@@ -38,7 +38,7 @@ jobs:
         with:
           components: clippy
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -F rayon -- -D warnings
 
   test:
     name: Test

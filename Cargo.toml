@@ -4,9 +4,9 @@ version = "0.0.1"
 rust-version = "1.82"
 edition = "2021"
 readme = "README.md"
+license = "MIT"
 repository = "https://github.com/jamjamjon/slsl"
 authors = ["Jamjamjon <xxyydzml@outlook.com>"]
-license = "MIT"
 description = "Experimental CPU tensor library with multi-DType support, leveraging SIMD, multithreading, and BLAS-style acceleration."
 exclude = ["examples/*", "benches/*", "tests/*"]
 
