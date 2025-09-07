@@ -35,7 +35,7 @@ openblas-src = { version = "0.10.12", optional = true, features = ["system"] }
 base64ct = "=1.7.3"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 rand_chacha = "0.3"
 ndarray = { version = "0.15.6", features = ["rayon"] }
 smallvec = "1.15.1"
