@@ -1,6 +1,7 @@
 use candle_core::{Device, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use slsl::Tensor;
+use std::hint::black_box;
 
 // ========== Test Data Generation ==========
 

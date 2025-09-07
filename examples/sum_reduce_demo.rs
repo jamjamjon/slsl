@@ -121,9 +121,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let sum_continuous = continuous_tensor.sum_all()?;
     println!("   Contiguous tensor sum (using backend optimization): {sum_continuous}");
-    println!("   Note: Contiguous tensors use highly optimized backend sum functions");
-    println!("   Note: Non-contiguous tensors use manual traversal implementation");
-    println!();
 
     println!("=== Demo completed ===");
 

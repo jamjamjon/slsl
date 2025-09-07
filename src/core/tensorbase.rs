@@ -644,7 +644,6 @@ impl<S: StorageTrait> TensorBase<S> {
     }
 
     /// Type-specific contiguous copy implementation
-    /// Uses optimized algorithms based on memory layout analysis
     #[inline(always)]
     fn make_contiguous_typed<T: TensorElement + Copy>(&self) -> Result<Tensor> {
         let total_elements = self.numel();

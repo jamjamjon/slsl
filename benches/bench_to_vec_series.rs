@@ -1,7 +1,8 @@
 use candle_core::{DType as CandleDType, Device, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ndarray::{Array1, Array2, Array3};
 use slsl::{s, Tensor};
+use std::hint::black_box;
 
 // ========== to_scalar Benchmarks ==========
 
@@ -11,7 +12,9 @@ fn bench_to_scalar(c: &mut Criterion) {
     // Create scalar tensors
     let slsl_tensor = Tensor::from_vec(vec![42.0f32], []).unwrap();
     let slsl_tensor_slice = slsl_tensor.slice(s![]);
-    let ndarray_tensor = Array1::from_vec(vec![42.0f32]).into_shape(()).unwrap();
+    let ndarray_tensor = Array1::from_vec(vec![42.0f32])
+        .into_shape_with_order(())
+        .unwrap();
     let device = Device::Cpu;
     let candle_tensor = CandleTensor::from_vec(vec![42.0f32], &[], &device).unwrap();
 

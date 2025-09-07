@@ -1,23 +1,22 @@
-#![allow(unused)]
-
 use candle_core::{Device, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use slsl::*;
+use std::hint::black_box;
 
-// Define data sizes of different scales
+// 1D
 const SMALL_SIZES: &[usize] = &[100, 500];
 const MEDIUM_SIZES: &[usize] = &[1000, 2000];
 const LARGE_SIZES: &[usize] = &[5000, 10000];
 
-// Define matrix sizes of different dimensions
+// 2D
 const SMALL_MATRICES: &[(usize, usize)] = &[(32, 32), (64, 64)];
 const MEDIUM_MATRICES: &[(usize, usize)] = &[(128, 128), (256, 256)];
-const LARGE_MATRICES: &[(usize, usize)] = &[(512, 512)];
+const LARGE_MATRICES: &[(usize, usize)] = &[(512, 512), (1024, 1024)];
 
-// Define 3D tensor sizes
+// 3D
 const SMALL_3D: &[(usize, usize, usize)] = &[(16, 16, 16), (32, 32, 32)];
 const MEDIUM_3D: &[(usize, usize, usize)] = &[(64, 64, 64), (128, 128, 128)];
-const LARGE_3D: &[(usize, usize, usize)] = &[(256, 256, 256)];
+const LARGE_3D: &[(usize, usize, usize)] = &[(256, 256, 256), (512, 512, 512)];
 
 // ========== 1D Tensor Benchmarks ==========
 
@@ -1224,19 +1223,14 @@ fn benchmark_3d_sum_keepdim(c: &mut Criterion) {
     group.finish();
 }
 
-// ========== Main Benchmark Registration ==========
-
 criterion_group!(
     benches,
-    // 1D benchmarks
     benchmark_1d_sum_all,
     benchmark_1d_sum,
     benchmark_1d_sum_keepdim,
-    // 2D benchmarks
     benchmark_2d_sum_all,
     benchmark_2d_sum,
     benchmark_2d_sum_keepdim,
-    // 3D benchmarks
     benchmark_3d_sum_all,
     benchmark_3d_sum,
     benchmark_3d_sum_keepdim,

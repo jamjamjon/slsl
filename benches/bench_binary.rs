@@ -1,8 +1,9 @@
 #![allow(unused)]
 
 use candle_core::{Device, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use slsl::*;
+use std::hint::black_box;
 
 const SMALL_SIZES: &[usize] = &[100, 500, 1000];
 const MEDIUM_SIZES: &[usize] = &[2000, 5000, 10000];

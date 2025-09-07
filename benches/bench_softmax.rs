@@ -1,7 +1,8 @@
 use candle_core::{Device, Tensor as CandleTensor};
 use candle_nn::ops::softmax;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use slsl::Tensor;
+use std::hint::black_box;
 use std::time::Duration;
 
 // Extended test sizes for comprehensive benchmarking

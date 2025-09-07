@@ -1,8 +1,9 @@
 use candle_core::{Device, IndexOp, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ndarray::{Array1, Array2, Array3};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use slsl::{s, Tensor};
+use std::hint::black_box;
 
 // Test data configuration
 const SIZES_1D: [usize; 4] = [10, 100, 1000, 10000];

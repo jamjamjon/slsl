@@ -84,6 +84,4 @@ fn main() {
     println!("F16 L2 norm (dim 0): {f16_duration:?}");
 
     println!("\n=== Performance Demo Complete ===");
-    println!("Note: The new implementation uses efficient backend acceleration");
-    println!("for L1 and L2 norms, while Lp norms use optimized manual calculation.");
 }

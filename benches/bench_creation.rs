@@ -1,8 +1,9 @@
 use candle_core::{Device, Tensor as CandleTensor};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ndarray::{Array1, Array2, Array3};
 use slsl::Tensor;
 use std::f64::consts::PI;
+use std::hint::black_box;
 
 // ========== Basic Creation Benchmarks ==========
 
@@ -235,7 +236,7 @@ fn bench_from_vec_2d(c: &mut Criterion) {
     group.bench_function("ndarray", |b| {
         b.iter(|| {
             let _tensor = Array1::from_vec(black_box(data.clone()))
-                .into_shape(black_box((shape[0], shape[1])))
+                .into_shape_with_order(black_box((shape[0], shape[1])))
                 .unwrap();
             black_box(_tensor)
         })
@@ -463,7 +464,7 @@ fn bench_scalar_creation(c: &mut Criterion) {
     group.bench_function("ndarray", |b| {
         b.iter(|| {
             let _tensor = Array1::from_vec(vec![black_box(42.0f32)])
-                .into_shape(())
+                .into_shape_with_order(())
                 .unwrap();
             black_box(_tensor)
         })

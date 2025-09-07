@@ -35,10 +35,8 @@ openblas-src = { version = "0.10.12", optional = true, features = ["system"] }
 base64ct = "=1.7.3"
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
-rand_chacha = "0.3"
-ndarray = { version = "0.15.6", features = ["rayon"] }
-smallvec = "1.15.1"
+criterion = { version = "0.7", features = ["html_reports"] }
+ndarray = { version = "0.16", features = ["rayon"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
 
@@ -49,7 +47,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 debug = false
-
 
 [[bench]]
 name = "bench_unary"
@@ -74,17 +71,14 @@ harness = false
 [[bench]]
 name = "bench_iter_dim"
 harness = false
+required-features = ["rayon"]
 
 [[bench]]
 name = "bench_to_vec_series"
 harness = false
 
 [[bench]]
-name = "bench_tensor_creation"
-harness = false
-
-[[bench]]
-name = "bench_ndarray_arc_iter"
+name = "bench_creation"
 harness = false
 
 [[bench]]
@@ -104,31 +98,9 @@ name = "bench_softmax"
 harness = false
 
 [[bench]]
-name = "bench_uninit_vec"
-harness = false
-
-[[bench]]
-name = "bench_mean"
-harness = false
-
-[[bench]]
 name = "bench_gemm"
 harness = false
 
 [[bench]]
 name = "bench_binary"
 harness = false
-
-[[bench]]
-name = "bench_par_iter"
-harness = false
-
-
-[[bench]]
-name = "bench_array_vec"
-harness = false
-
-[[bench]]
-name = "bench_containers"
-harness = false
-
