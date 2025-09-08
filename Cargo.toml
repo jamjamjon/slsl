@@ -38,7 +38,7 @@ criterion = { version = "0.7", features = ["html_reports"] }
 ndarray = { version = "0.16", features = ["rayon"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
-base64ct = "=1.7.3"
+base64ct = "=1.8.0"
 
 
 [profile.release]
