@@ -1,9 +1,6 @@
 use anyhow::Result;
 
-use crate::{
-    backend::{global_backend, r#impl::OpsTrait},
-    DType, StorageTrait, TensorBase,
-};
+use crate::{global_backend, DType, OpsTrait, StorageTrait, TensorBase};
 
 impl<S: StorageTrait> TensorBase<S> {
     /// Compute dot product between two 1D tensors

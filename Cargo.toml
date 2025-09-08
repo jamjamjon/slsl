@@ -32,13 +32,13 @@ rayon = { version = "1.10", optional = true }
 accelerate-src = { version = "0.3.2", optional = true }
 intel-mkl-src = { version = "0.8", optional = true, features = ["mkl-dynamic-lp64-iomp"] }
 openblas-src = { version = "0.10.12", optional = true, features = ["system"] }
-base64ct = "=1.7.3"
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
 ndarray = { version = "0.16", features = ["rayon"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
+base64ct = "=1.7.3"
 
 
 [profile.release]

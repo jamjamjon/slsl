@@ -8,7 +8,6 @@ mod slice;
 mod unary;
 
 pub use backend::*;
-// pub use backend::{global_backend, Backend, OpsTrait};
 pub use core::*;
 pub use reduce::*;
 pub use slice::{elem::*, IntoSliceElem};

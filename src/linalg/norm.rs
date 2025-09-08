@@ -37,7 +37,6 @@ impl<S: StorageTrait> TensorBase<S> {
     pub fn norm1<D: Dim>(&self, dim: D) -> Result<Tensor> {
         let dim_idx = dim.to_dim(self.rank())?;
 
-        // norm1 supports all numeric types except bool
         if self.dtype == DType::Bool {
             anyhow::bail!("norm1 does not support Bool dtype");
         }
@@ -155,7 +154,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -175,7 +174,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -195,7 +194,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -215,7 +214,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -236,7 +235,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i8>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -256,7 +255,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i16>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -276,7 +275,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -296,7 +295,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -316,7 +315,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u8>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -336,7 +335,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u16>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -356,7 +355,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -376,7 +375,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -407,7 +406,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -429,7 +428,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -451,7 +450,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -475,7 +474,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -500,7 +499,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i8>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -520,7 +519,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i16>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -540,7 +539,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -560,7 +559,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<i64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -580,7 +579,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer, do not clear capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u8>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -600,7 +599,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u16>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -620,7 +619,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -640,7 +639,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_int::<u64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -674,7 +673,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -694,7 +693,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -714,7 +713,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -734,7 +733,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -765,7 +764,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -788,7 +787,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -811,7 +810,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -834,7 +833,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -874,7 +873,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -901,7 +900,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -929,7 +928,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -957,7 +956,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -995,7 +994,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f32>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -1022,7 +1021,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_typed::<f64>(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -1050,7 +1049,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_f16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
@@ -1078,7 +1077,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for (slice_idx, dst) in dst_to_set.iter_mut().enumerate() {
                     // Reuse buffer without clearing capacity
-                    slice_buffer.truncate(0);
+
                     self._fill_slice_values_bf16(dim_idx, slice_idx, &mut slice_buffer)?;
                     unsafe { slice_buffer.set_len(dim_size) };
 
