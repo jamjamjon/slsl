@@ -1,9 +1,6 @@
 use anyhow::Result;
 
-use crate::{
-    backend::{global_backend, r#impl::OpsTrait},
-    DType, StorageTrait, Tensor, TensorBase, UninitVec,
-};
+use crate::{global_backend, DType, OpsTrait, StorageTrait, Tensor, TensorBase, UninitVec};
 
 impl<S: StorageTrait> TensorBase<S> {
     #[inline(always)]

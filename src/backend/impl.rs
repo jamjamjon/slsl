@@ -6,9 +6,6 @@ use simsimd::SpatialSimilarity;
 ///
 /// This trait provides a unified interface for various mathematical backends
 /// including Accelerate (macOS), Intel MKL, OpenBLAS, and fallback implementations.
-///
-/// Inspired by candle-core's design, this trait only includes core BLAS operations
-/// that have actual accelerated implementations in major backends.
 pub trait OpsTrait: Send + Sync {
     crate::impl_v_abs!(f32, f64, i8, i16, i32, i64);
     crate::impl_v_abs_half!();
@@ -47,10 +44,12 @@ pub trait OpsTrait: Send + Sync {
     crate::impl_v_neg!(i8, i16, i32, i64, f32, f64);
     crate::impl_v_neg_half!();
 
-    // Integer types use f64 return type to avoid overflow
-    crate::impl_gemm_optimized!(f32, f64);
+    crate::impl_scal!(f32, f64);
+
+    crate::impl_gemm_sd!(f32, f64);
     crate::impl_gemm!(i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_gemm_half!();
+
     crate::impl_v_add!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_v_add_half!();
     crate::impl_v_sub!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
@@ -59,25 +58,14 @@ pub trait OpsTrait: Send + Sync {
     crate::impl_v_mul_half!();
     crate::impl_v_div!(f32, f64);
     crate::impl_v_div_half!();
-
-    // Scalar division operations for floating point types only
-    crate::impl_v_div_scalar!(f32, f64);
-    crate::impl_v_div_scalar_half!();
-
-    // Only reasonable for floating point
-    crate::impl_scal!(f32, f64);
-
-    // Scalar addition operations for all numeric types
     crate::impl_v_add_scalar!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_v_add_scalar_half!();
-
-    // Scalar subtraction operations for all numeric types
     crate::impl_v_sub_scalar!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_v_sub_scalar_half!();
-
-    // Scalar multiplication operations for all numeric types
     crate::impl_v_mul_scalar!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_v_mul_scalar_half!();
+    crate::impl_v_div_scalar!(f32, f64);
+    crate::impl_v_div_scalar_half!();
 
     crate::impl_asum_signed!(f32, f64, i8, i16, i32, i64);
     crate::impl_asum_unsigned!(u8, u16, u32, u64);

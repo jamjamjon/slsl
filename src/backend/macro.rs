@@ -102,7 +102,7 @@ macro_rules! impl_asum_half {
 /// Generate general matrix multiplication for all numeric types
 /// Generate optimized GEMM implementations for f32 and f64 using unified gemm library
 #[macro_export]
-macro_rules! impl_gemm_optimized {
+macro_rules! impl_gemm_sd {
     (f32, f64) => {
         /// Performs matrix multiplication for f32: C = A * B
         /// Uses optimized gemm library implementation with dynamic thread configuration

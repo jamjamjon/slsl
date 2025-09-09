@@ -1,5 +1,4 @@
-use crate::UninitVec;
-use crate::{DType, Dim, StorageTrait, Tensor, TensorBase};
+use crate::{DType, Dim, StorageTrait, Tensor, TensorBase, UninitVec};
 use anyhow::Result;
 use wide::{f32x4, f32x8, f64x2, f64x4};
 
