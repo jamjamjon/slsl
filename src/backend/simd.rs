@@ -1,5 +1,7 @@
+#![allow(dead_code)]
 //! SIMD configuration based on target architecture and runtime detection
 //! This provides compile-time and runtime SIMD width detection for optimal performance
+use wide::{f32x8, f64x4};
 
 use std::sync::LazyLock;
 
@@ -110,5 +112,248 @@ pub(crate) fn choose_f64_simd_width(data_size: usize) -> usize {
         2
     } else {
         1 // Scalar fallback for small data
+    }
+}
+
+pub trait WideSimd: Copy {
+    type Element: crate::TensorElement + num_traits::Float;
+    type Array: AsRef<[Self::Element]> + AsMut<[Self::Element]> + Copy;
+    const LANE: usize;
+
+    const ONE: Self;
+    const ZERO: Self;
+    const HALF: Self;
+    const NEG_INFINITY: Self;
+    const INFINITY: Self;
+
+    fn new(arr: Self::Array) -> Self;
+    fn from_slice(slice: &[Self::Element]) -> Self;
+
+    /// Load from potentially unaligned memory without intermediate copy
+    /// # Safety
+    /// slice must have at least LANE elements
+    unsafe fn from_slice_unaligned(slice: &[Self::Element]) -> Self {
+        debug_assert!(slice.len() >= Self::LANE);
+        let ptr = slice.as_ptr() as *const Self::Array;
+        Self::new(ptr.read_unaligned())
+    }
+
+    fn splat(val: Self::Element) -> Self;
+    fn to_array(self) -> Self::Array;
+    fn as_array_ref(&self) -> &Self::Array;
+    fn as_array_mut(&mut self) -> &mut Self::Array;
+    fn abs(self) -> Self;
+    fn max(self, rhs: Self) -> Self;
+    fn min(self, rhs: Self) -> Self;
+    fn exp(self) -> Self;
+    fn sqrt(self) -> Self;
+    fn recip(self) -> Self;
+    fn recip_sqrt(self) -> Self;
+    fn add(self, rhs: Self) -> Self;
+    fn sub(self, rhs: Self) -> Self;
+    fn mul(self, rhs: Self) -> Self;
+    fn div(self, rhs: Self) -> Self;
+    fn sum(self) -> Self::Element
+    where
+        Self::Element: std::iter::Sum<Self::Element>,
+    {
+        self.as_array_ref().as_ref().iter().copied().sum()
+    }
+}
+
+impl WideSimd for f32x8 {
+    type Element = f32;
+    type Array = [f32; 8];
+    const LANE: usize = 8;
+    const ONE: Self = Self::ONE;
+    const ZERO: Self = Self::ZERO;
+    const HALF: Self = Self::HALF;
+    const NEG_INFINITY: Self = Self::new([f32::NEG_INFINITY; 8]);
+    const INFINITY: Self = Self::new([f32::INFINITY; 8]);
+
+    #[inline(always)]
+    fn new(arr: Self::Array) -> Self {
+        f32x8::new(arr)
+    }
+
+    #[inline(always)]
+    fn from_slice(slice: &[f32]) -> Self {
+        let mut arr = [0.0f32; 8];
+        arr.copy_from_slice(&slice[..8]);
+        f32x8::new(arr)
+    }
+
+    #[inline(always)]
+    fn splat(val: f32) -> Self {
+        f32x8::splat(val)
+    }
+
+    #[inline(always)]
+    fn to_array(self) -> Self::Array {
+        *self.as_array_ref()
+    }
+
+    #[inline(always)]
+    fn as_array_ref(&self) -> &Self::Array {
+        self.as_array_ref()
+    }
+
+    #[inline(always)]
+    fn as_array_mut(&mut self) -> &mut Self::Array {
+        self.as_array_mut()
+    }
+
+    #[inline(always)]
+    fn abs(self) -> Self {
+        self.abs()
+    }
+
+    #[inline(always)]
+    fn max(self, rhs: Self) -> Self {
+        self.max(rhs)
+    }
+
+    #[inline(always)]
+    fn min(self, rhs: Self) -> Self {
+        self.min(rhs)
+    }
+
+    #[inline(always)]
+    fn exp(self) -> Self {
+        f32x8::exp(self)
+    }
+
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f32x8::sqrt(self)
+    }
+
+    #[inline(always)]
+    fn recip(self) -> Self {
+        f32x8::recip(self)
+    }
+
+    #[inline(always)]
+    fn recip_sqrt(self) -> Self {
+        f32x8::recip_sqrt(self)
+    }
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        self + rhs
+    }
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self {
+        self * rhs
+    }
+
+    #[inline(always)]
+    fn div(self, rhs: Self) -> Self {
+        self / rhs
+    }
+}
+
+impl WideSimd for f64x4 {
+    type Element = f64;
+    type Array = [f64; 4];
+    const LANE: usize = 4;
+
+    const ONE: Self = Self::ONE;
+    const ZERO: Self = Self::ZERO;
+    const HALF: Self = Self::HALF;
+    const NEG_INFINITY: Self = Self::new([f64::NEG_INFINITY; 4]);
+    const INFINITY: Self = Self::new([f64::INFINITY; 4]);
+
+    #[inline(always)]
+    fn new(arr: Self::Array) -> Self {
+        f64x4::new(arr)
+    }
+
+    #[inline(always)]
+    fn from_slice(slice: &[f64]) -> Self {
+        let mut arr = [0.0f64; 4];
+        arr.copy_from_slice(&slice[..4]);
+        f64x4::new(arr)
+    }
+
+    #[inline(always)]
+    fn splat(val: f64) -> Self {
+        f64x4::splat(val)
+    }
+
+    #[inline(always)]
+    fn to_array(self) -> Self::Array {
+        *self.as_array_ref()
+    }
+
+    #[inline(always)]
+    fn as_array_ref(&self) -> &Self::Array {
+        self.as_array_ref()
+    }
+
+    #[inline(always)]
+    fn as_array_mut(&mut self) -> &mut Self::Array {
+        self.as_array_mut()
+    }
+
+    #[inline(always)]
+    fn abs(self) -> Self {
+        self.abs()
+    }
+
+    #[inline(always)]
+    fn max(self, rhs: Self) -> Self {
+        self.max(rhs)
+    }
+
+    #[inline(always)]
+    fn min(self, rhs: Self) -> Self {
+        self.min(rhs)
+    }
+
+    #[inline(always)]
+    fn exp(self) -> Self {
+        f64x4::exp(self)
+    }
+
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f64x4::sqrt(self)
+    }
+
+    #[inline(always)]
+    fn recip(self) -> Self {
+        Self::splat(1.0) / self
+    }
+
+    #[inline(always)]
+    fn recip_sqrt(self) -> Self {
+        Self::splat(1.0) / f64x4::sqrt(self)
+    }
+
+    #[inline(always)]
+    fn add(self, rhs: Self) -> Self {
+        self + rhs
+    }
+
+    #[inline(always)]
+    fn sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
+
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self {
+        self * rhs
+    }
+
+    #[inline(always)]
+    fn div(self, rhs: Self) -> Self {
+        self / rhs
     }
 }

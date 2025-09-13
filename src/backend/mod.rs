@@ -9,8 +9,10 @@ mod openblas;
 
 pub(crate) mod r#impl;
 pub(crate) mod r#macro;
+pub(crate) mod simd;
 
 pub use r#impl::*;
+pub use simd::*;
 
 #[cfg(any(feature = "accelerate", feature = "mkl", feature = "openblas"))]
 pub(crate) mod cblas_consts {
@@ -67,5 +69,3 @@ static GLOBAL_BACKEND: LazyLock<Backend> = LazyLock::new(create_backend);
 pub fn global_backend() -> &'static Backend {
     &GLOBAL_BACKEND
 }
-
-pub(crate) mod simd;
