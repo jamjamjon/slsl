@@ -12,6 +12,7 @@ mod round;
 mod sigmoid;
 mod sin;
 mod softmax;
+mod sqr;
 mod sqrt;
 mod tan;
 mod tanh;

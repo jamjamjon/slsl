@@ -24,8 +24,7 @@ impl<S: StorageTrait> TensorBase<S> {
             let reduce_size = self.shape()[dim_index];
             let output_size = self.numel() / reduce_size;
 
-            let (new_shape, _) =
-                crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
+            let (new_shape, _) = crate::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 
             match self.dtype() {
                 DType::Fp32 => {

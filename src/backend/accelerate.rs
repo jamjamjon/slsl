@@ -83,6 +83,10 @@ extern "C" {
     fn vvsqrtf(y: *mut c_float, x: *const c_float, n: *const c_int);
     fn vvsqrt(y: *mut c_double, x: *const c_double, n: *const c_int);
 
+    // vDSP square functions
+    fn vDSP_vsq(x: *const c_float, ix: c_int, y: *mut c_float, iy: c_int, n: c_int);
+    fn vDSP_vsqD(x: *const c_double, ix: c_int, y: *mut c_double, iy: c_int, n: c_int);
+
     // vDSP basic operations
     fn vDSP_vneg(a: *const c_float, ia: c_int, c: *mut c_float, ic: c_int, n: c_int);
     fn vDSP_vnegD(a: *const c_double, ia: c_int, c: *mut c_double, ic: c_int, n: c_int);
@@ -420,13 +424,13 @@ impl OpsTrait for AccelerateBackend {
         result
     }
 
-    #[inline(always)]
-    fn sum_bf16(&self, x: &[half::bf16]) -> f64 {
-        if x.is_empty() {
-            return 0.0f64;
-        }
-        x.iter().map(|xi| xi.to_f64()).sum()
-    }
+    // #[inline(always)]
+    // fn sum_bf16(&self, x: &[half::bf16]) -> f64 {
+    //     if x.is_empty() {
+    //         return 0.0f64;
+    //     }
+    //     x.iter().map(|xi| xi.to_f64()).sum()
+    // }
 
     // Mean operations using vDSP_meanv and vDSP_meanvD
     #[inline(always)]
@@ -447,25 +451,6 @@ impl OpsTrait for AccelerateBackend {
         let mut result = 0.0f64;
         unsafe { vDSP_meanvD(x.as_ptr(), 1, &mut result, x.len() as c_int) }
         result
-    }
-
-    // Half precision mean operations
-    #[inline(always)]
-    fn mean_f16(&self, x: &[half::f16]) -> f64 {
-        if x.is_empty() {
-            return 0.0f64;
-        }
-        let sum = self.sum_f16(x);
-        sum / (x.len() as f64)
-    }
-
-    #[inline(always)]
-    fn mean_bf16(&self, x: &[half::bf16]) -> f64 {
-        if x.is_empty() {
-            return 0.0f64;
-        }
-        let sum = self.sum_bf16(x);
-        sum / (x.len() as f64)
     }
 
     #[inline(always)]
@@ -660,6 +645,26 @@ impl OpsTrait for AccelerateBackend {
         );
         let n = x.len() as c_int;
         unsafe { vvsqrt(out.as_mut_ptr(), x.as_ptr(), &n) }
+    }
+
+    #[inline(always)]
+    fn v_sqr_f32(&self, x: &[f32], out: &mut [f32]) {
+        assert_eq!(
+            x.len(),
+            out.len(),
+            "Input and output slices must have same length"
+        );
+        unsafe { vDSP_vsq(x.as_ptr(), 1, out.as_mut_ptr(), 1, x.len() as c_int) }
+    }
+
+    #[inline(always)]
+    fn v_sqr_f64(&self, x: &[f64], out: &mut [f64]) {
+        assert_eq!(
+            x.len(),
+            out.len(),
+            "Input and output slices must have same length"
+        );
+        unsafe { vDSP_vsqD(x.as_ptr(), 1, out.as_mut_ptr(), 1, x.len() as c_int) }
     }
 
     #[inline(always)]

@@ -27,6 +27,9 @@ pub trait OpsTrait: Send + Sync {
     crate::impl_v_sqrt!(f32, f64);
     crate::impl_v_sqrt_half!();
 
+    crate::impl_v_sqr!(f32, f64, i8, i16, i32, i64, u8, u16, u32, u64);
+    crate::impl_v_sqr_half!();
+
     crate::impl_v_tan!(f32, f64);
     crate::impl_v_tan_half!();
 
@@ -1058,13 +1061,13 @@ mod tests {
     fn test_norm_backend_integration() {
         let backend = global_backend();
 
-        // Test L1 norm (norm1) - should use backend asum
+        // Test L1 norm (norm_l1) - should use backend asum
         let test_vector = vec![3.0f32, -4.0, 5.0, -6.0];
         let l1_norm = backend.asum_f32(&test_vector);
         let expected_l1 = 3.0 + 4.0 + 5.0 + 6.0; // sum of absolute values
         assert!((l1_norm - expected_l1).abs() < 1e-6);
 
-        // Test L2 norm (norm2) - should use backend nrm2
+        // Test L2 norm (norm_l2) - should use backend nrm2
         let l2_norm = backend.nrm2_f32(&test_vector);
         let expected_l2 = (3.0f32 * 3.0 + 4.0 * 4.0 + 5.0 * 5.0 + 6.0 * 6.0).sqrt(); // sqrt of sum of squares
         assert!((l2_norm - expected_l2 as f64).abs() < 1e-6);

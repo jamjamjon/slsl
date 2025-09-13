@@ -106,6 +106,9 @@ extern "C" {
     fn vsSqrt(n: c_int, a: *const c_float, y: *mut c_float);
     fn vdSqrt(n: c_int, a: *const c_double, y: *mut c_double);
 
+    fn vsSqr(n: c_int, a: *const c_float, y: *mut c_float);
+    fn vdSqr(n: c_int, a: *const c_double, y: *mut c_double);
+
     fn vsAdd(n: c_int, a: *const c_float, b: *const c_float, y: *mut c_float);
     fn vdAdd(n: c_int, a: *const c_double, b: *const c_double, y: *mut c_double);
 
@@ -411,6 +414,26 @@ impl OpsTrait for MklBackend {
             "Input and output slices must have same length"
         );
         unsafe { vdSqrt(x.len() as c_int, x.as_ptr(), out.as_mut_ptr()) }
+    }
+
+    #[inline(always)]
+    fn v_sqr_f32(&self, x: &[f32], out: &mut [f32]) {
+        assert_eq!(
+            x.len(),
+            out.len(),
+            "Input and output slices must have same length"
+        );
+        unsafe { vsSqr(x.len() as c_int, x.as_ptr(), out.as_mut_ptr()) }
+    }
+
+    #[inline(always)]
+    fn v_sqr_f64(&self, x: &[f64], out: &mut [f64]) {
+        assert_eq!(
+            x.len(),
+            out.len(),
+            "Input and output slices must have same length"
+        );
+        unsafe { vdSqr(x.len() as c_int, x.as_ptr(), out.as_mut_ptr()) }
     }
 
     #[inline(always)]

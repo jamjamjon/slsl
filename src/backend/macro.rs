@@ -701,6 +701,60 @@ macro_rules! impl_v_sqrt_half {
     };
 }
 
+/// Generate vectorized square (element-wise) for all numeric types
+#[macro_export]
+macro_rules! impl_v_sqr {
+    ($($t:ty),+) => {
+        $(
+            paste::paste! {
+    #[inline(always)]
+    fn [<v_sqr_ $t>](&self, x: &[$t], out: &mut [$t]) {
+                    assert_eq!(
+                        x.len(),
+                        out.len(),
+                        "Input and output slices must have same length"
+                    );
+                    for (o, xi) in out.iter_mut().zip(x.iter()) {
+                        *o = (*xi) * (*xi);
+                    }
+                }
+            }
+        )+
+    };
+}
+
+/// Generate vectorized square (element-wise) for f16 and bf16
+#[macro_export]
+macro_rules! impl_v_sqr_half {
+    () => {
+        #[inline(always)]
+        fn v_sqr_f16(&self, x: &[half::f16], out: &mut [half::f16]) {
+            assert_eq!(
+                x.len(),
+                out.len(),
+                "Input and output slices must have same length"
+            );
+            for (o, xi) in out.iter_mut().zip(x.iter()) {
+                let val = xi.to_f32();
+                *o = half::f16::from_f32(val * val);
+            }
+        }
+
+        #[inline(always)]
+        fn v_sqr_bf16(&self, x: &[half::bf16], out: &mut [half::bf16]) {
+            assert_eq!(
+                x.len(),
+                out.len(),
+                "Input and output slices must have same length"
+            );
+            for (o, xi) in out.iter_mut().zip(x.iter()) {
+                let val = xi.to_f32();
+                *o = half::bf16::from_f32(val * val);
+            }
+        }
+    };
+}
+
 /// Generate vectorized element-wise addition for all numeric types
 #[macro_export]
 macro_rules! impl_v_add {
