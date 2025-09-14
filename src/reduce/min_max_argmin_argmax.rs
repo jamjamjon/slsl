@@ -24,17 +24,14 @@ impl<S: StorageTrait> TensorBase<S> {
         keepdim: bool,
     ) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
         let dim_index = dim.to_dim(self.rank())?;
-
         if self.shape()[dim_index] == 0 {
             anyhow::bail!("Cannot reduce an axis with size 0");
         }
-
-        // optimized contiguous-last-dim path
-        if self.is_contiguous() && dim_index == self.rank() - 1 {
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_index]) {
             let backend = global_backend();
-            let reduce_size = self.shape()[dim_index];
+            let shape = self.shape();
+            let reduce_size = shape[dim_index];
             let output_size = self.numel() / reduce_size;
-
             let (new_shape, _) =
                 crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 

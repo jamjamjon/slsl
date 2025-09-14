@@ -4,28 +4,29 @@ use half::{bf16, f16};
 use crate::{global_backend, DType, Dim, OpsTrait, StorageTrait, Tensor, TensorBase, UninitVec};
 
 impl<S: StorageTrait> TensorBase<S> {
+    #[inline(always)]
     pub fn argmin<D: Dim + Clone>(&self, dim: D) -> Result<Tensor> {
         self.argmin_impl(dim, false)
     }
 
+    #[inline(always)]
     pub fn argmin_keepdim<D: Dim + Clone>(&self, dim: D) -> Result<Tensor> {
         self.argmin_impl(dim, true)
     }
 
+    #[inline(always)]
     pub fn argmin_impl<D: Dim + Clone>(&self, dim: D, keepdim: bool) -> Result<Tensor> {
         let dim_index = dim.to_dim(self.rank())?;
-
         if self.shape()[dim_index] == 0 {
             anyhow::bail!("Cannot find argmin of dimension with size 0");
         }
 
-        if self.is_contiguous() && dim_index == self.rank() - 1 {
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_index]) {
             let backend = global_backend();
-            let reduce_size = self.shape()[dim_index];
+            let shape = self.shape();
+            let reduce_size = shape[dim_index];
             let output_size = self.numel() / reduce_size;
-
-            let (new_shape, _) =
-                crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
+            let (new_shape, _) = crate::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 
             match self.dtype() {
                 DType::Fp32 => {
@@ -177,7 +178,6 @@ impl<S: StorageTrait> TensorBase<S> {
         } else {
             let (new_shape, _) =
                 crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
-
             let result_size = new_shape.iter().product();
             match self.dtype() {
                 DType::Fp32 => {

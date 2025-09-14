@@ -7,24 +7,25 @@ use crate::{
 };
 
 impl<S: StorageTrait> TensorBase<S> {
+    #[inline(always)]
     pub fn sum<D: Dims>(&self, dims: D) -> Result<Tensor> {
         self.sum_impl(dims, false)
     }
 
+    #[inline(always)]
     pub fn sum_keepdim<D: Dims>(&self, dims: D) -> Result<Tensor> {
         self.sum_impl(dims, true)
     }
 
-    /// Unified sum implementation: determines whether to keep dimensions based on the keepdim parameter
+    #[inline(always)]
     fn sum_impl<D: Dims>(&self, dims: D, keepdim: bool) -> Result<Tensor> {
         let dim_indices = dims.to_dims(self.rank())?;
+        let (new_shape, new_strides) = reduce_shape_stride(self.shape, &dim_indices, keepdim);
 
         // If no dimension is specified, return the result of sum_all
         if dim_indices.is_empty() {
             let sum_val = self.sum_all()?;
             if keepdim {
-                // keepdim with no dims should return tensor with same shape but all 1s
-                let (new_shape, _) = reduce_shape_stride(self.shape, &dim_indices, keepdim);
                 return Tensor::full(new_shape, sum_val);
             } else {
                 return Tensor::from_scalar(sum_val);
@@ -35,130 +36,104 @@ impl<S: StorageTrait> TensorBase<S> {
         if dim_indices.len() == self.rank() {
             let sum_val = self.sum_all()?;
             if keepdim {
-                let (new_shape, _) = reduce_shape_stride(self.shape, &dim_indices, keepdim);
                 return Tensor::full(new_shape, sum_val);
             } else {
                 return Tensor::from_scalar(sum_val);
             }
         }
 
-        // Unified shape and stride calculation
-        let (new_shape, new_strides) = reduce_shape_stride(self.shape, &dim_indices, keepdim);
-
-        // Check if we can use optimized contiguous path
-        if self.is_contiguous() {
-            // Check if reducing trailing dimensions (avoid unnecessary sorting)
-            let rank = self.rank();
-            let num_reduce_dims = dim_indices.len();
-            let trailing_start = rank - num_reduce_dims;
-
-            let is_trailing = dim_indices
-                .iter()
-                .enumerate()
-                .all(|(i, &d)| d == trailing_start + i)
-                && dim_indices.windows(2).all(|w| w[0] < w[1]); // Already sorted check
-
-            if is_trailing {
-                return self.sum_contiguous(&dim_indices, new_shape);
-            }
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&dim_indices) {
+            return self.sum_contiguous(&dim_indices, new_shape);
         }
-
         self.sum_non_contiguous(&dim_indices, keepdim, new_shape, new_strides)
     }
 
-    /// Unified optimized implementation for contiguous memory
+    #[inline(always)]
     fn sum_contiguous(&self, dim_indices: &[usize], new_shape: Shape) -> Result<Tensor> {
         let backend = global_backend();
-
-        // Calculate the size of the reduction dimension
-        let reduce_size: usize = dim_indices.iter().map(|&dim| self.shape()[dim]).product();
-
-        // Calculate the size of the output tensor
+        let shape = self.shape();
+        let reduce_size: usize = dim_indices.iter().map(|&dim| shape[dim]).product();
         let output_size = self.numel() / reduce_size;
+        let stride = if dim_indices.len() == 1 {
+            shape[dim_indices[0]]
+        } else {
+            reduce_size
+        };
 
-        // Select the optimal implementation based on data type
         match self.dtype() {
             DType::Fp32 => {
                 let data = self.as_slice::<f32>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.sum_f32(&data[start..end]) as f64;
                     }
                 });
-
                 Tensor::from_vec(output, new_shape)
             }
             DType::Fp64 => {
                 let data = self.as_slice::<f64>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_f64(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_f64(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Fp16 => {
                 let data = self.as_slice::<f16>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_f16(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_f16(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Bf16 => {
                 let data = self.as_slice::<bf16>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_bf16(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_bf16(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Int8 => {
                 let data = self.as_slice::<i8>()?;
-
-                let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
+                let output = UninitVec::<i64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_i8(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_i8(&data[start..end]) as i64;
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Int16 => {
                 let data = self.as_slice::<i16>()?;
-
-                let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
+                let output = UninitVec::<i64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_i16(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_i16(&data[start..end]) as i64;
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Int32 => {
                 let data = self.as_slice::<i32>()?;
-
-                let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
+                let output = UninitVec::<i64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_i32(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_i32(&data[start..end]) as i64;
                     }
                 });
                 Tensor::from_vec(output, new_shape)
@@ -167,57 +142,53 @@ impl<S: StorageTrait> TensorBase<S> {
                 let data = self.as_slice::<i64>()?;
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_i64(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_i64(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Uint8 => {
                 let data = self.as_slice::<u8>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_u8(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_u8(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Uint16 => {
                 let data = self.as_slice::<u16>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_u16(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_u16(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Uint32 => {
                 let data = self.as_slice::<u32>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_u32(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_u32(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
             }
             DType::Uint64 => {
                 let data = self.as_slice::<u64>()?;
-
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
-                        *item = backend.sum_u64(&data[start..end]) as f64;
+                        let start = i * stride;
+                        let end = start + stride;
+                        *item = backend.sum_u64(&data[start..end]);
                     }
                 });
                 Tensor::from_vec(output, new_shape)
@@ -226,7 +197,7 @@ impl<S: StorageTrait> TensorBase<S> {
         }
     }
 
-    /// Optimized general implementation
+    #[inline(always)]
     fn sum_non_contiguous(
         &self,
         dim_indices: &[usize],
@@ -236,15 +207,12 @@ impl<S: StorageTrait> TensorBase<S> {
     ) -> Result<Tensor> {
         let rank = self.rank();
         let shape = self.shape();
-
-        // Precompute reduction information
         let mut reduction_map = vec![false; rank];
         for &dim_idx in dim_indices {
             if dim_idx < rank {
                 reduction_map[dim_idx] = true;
             }
         }
-
         let result_size = new_shape.numel();
         let mut output: Vec<f64> = vec![0.0; result_size];
 
@@ -318,6 +286,7 @@ impl<S: StorageTrait> TensorBase<S> {
         Tensor::from_vec(output, new_shape)
     }
 
+    #[inline(always)]
     pub fn sum_all(&self) -> Result<f64> {
         if self.numel() == 0 {
             return Ok(0.);
@@ -330,6 +299,7 @@ impl<S: StorageTrait> TensorBase<S> {
         }
     }
 
+    #[inline(always)]
     fn sum_all_contiguous(&self) -> Result<f64> {
         let backend = global_backend();
 
@@ -386,30 +356,121 @@ impl<S: StorageTrait> TensorBase<S> {
         }
     }
 
+    #[inline(always)]
     fn sum_all_non_contiguous(&self) -> Result<f64> {
-        let mut sum = 0.0f64;
-        for elem in self.iter() {
-            let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-            let val = unsafe {
-                match self.dtype() {
-                    DType::Fp32 => *ptr as f64,
-                    DType::Fp64 => *(ptr as *const f64),
-                    DType::Fp16 => f64::from(*(ptr as *const f16)),
-                    DType::Bf16 => f64::from(*(ptr as *const bf16)),
-                    DType::Int8 => *ptr as f64,
-                    DType::Int16 => *ptr as f64,
-                    DType::Int32 => *ptr as f64,
-                    DType::Int64 => *ptr as f64,
-                    DType::Uint8 => *ptr as f64,
-                    DType::Uint16 => *ptr as f64,
-                    DType::Uint32 => *ptr as f64,
-                    DType::Uint64 => *ptr as f64,
-                    _ => anyhow::bail!("Sum operation not supported for dtype: {:?}", self.dtype()),
+        match self.dtype() {
+            // Floating point types - accumulate directly as f64
+            DType::Fp32 => {
+                let mut sum = 0.0f64;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as f64 };
+                    sum += val;
                 }
-            };
-            sum += val;
+                Ok(sum)
+            }
+            DType::Fp64 => {
+                let mut sum = 0.0f64;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *(ptr as *const f64) };
+                    sum += val;
+                }
+                Ok(sum)
+            }
+            DType::Fp16 => {
+                let mut sum = 0.0f64;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { f64::from(*(ptr as *const f16)) };
+                    sum += val;
+                }
+                Ok(sum)
+            }
+            DType::Bf16 => {
+                let mut sum = 0.0f64;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { f64::from(*(ptr as *const bf16)) };
+                    sum += val;
+                }
+                Ok(sum)
+            }
+            // Integer types - use appropriate accumulator types to avoid overflow
+            DType::Uint8 => {
+                let mut sum: u64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as u64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Int8 => {
+                let mut sum: i64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as i64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Uint16 => {
+                let mut sum: u64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as u64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Int16 => {
+                let mut sum: i64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as i64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Uint32 => {
+                let mut sum: u64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as u64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Int32 => {
+                let mut sum: i64 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as i64 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Uint64 => {
+                let mut sum: u128 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as u128 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            DType::Int64 => {
+                let mut sum: i128 = 0;
+                for elem in self.iter() {
+                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+                    let val = unsafe { *ptr as i128 };
+                    sum += val;
+                }
+                Ok(sum as f64)
+            }
+            _ => anyhow::bail!("Sum operation not supported for dtype: {:?}", self.dtype()),
         }
-        Ok(sum)
     }
 }
 

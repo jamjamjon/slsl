@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
+use crate::backend::simd::WideSimd;
 use simsimd::SpatialSimilarity;
 
 /// OpsTrait trait for accelerated tensor operations
@@ -74,17 +75,113 @@ pub trait OpsTrait: Send + Sync {
     crate::impl_asum_unsigned!(u8, u16, u32, u64);
     crate::impl_asum_half!();
 
-    // Sum operations - implemented using macros
-    crate::impl_sum_float!(f32, f64);
-    crate::impl_sum_int!(i8, i16, i32, i64, u8, u16, u32, u64);
-    crate::impl_sum_half!();
+    crate::impl_v_pow!(f32, f64);
+
+    // Sum operations - implemented directly with SIMD optimization
+    /// SIMD-optimized sum function for f32 arrays
+    /// Uses f32x8 vectors with reduce_add for optimal performance
+    #[inline(always)]
+    fn sum_f32(&self, x: &[f32]) -> f32 {
+        if x.is_empty() {
+            return 0.0;
+        }
+
+        // Use SIMD optimization for larger arrays
+        if x.len() >= 32 {
+            use wide::f32x8;
+
+            let chunks = x.chunks_exact(8);
+            let remainder = chunks.remainder();
+
+            // Process chunks of 8 elements using SIMD
+            let mut sum_vec = f32x8::splat(0.0);
+            for chunk in chunks {
+                let vec = f32x8::from_slice(chunk);
+                sum_vec += vec;
+            }
+
+            // Use reduce_add to sum all elements in the vector
+            let mut result = sum_vec.reduce_add();
+
+            // Process remaining elements
+            for &val in remainder {
+                result += val;
+            }
+
+            return result;
+        }
+
+        // Fallback to standard sum for small arrays
+        x.iter().sum()
+    }
+
+    /// SIMD-optimized sum function for f64 arrays
+    /// Uses f64x4 vectors with reduce_add for optimal performance
+    #[inline(always)]
+    fn sum_f64(&self, x: &[f64]) -> f64 {
+        if x.is_empty() {
+            return 0.0;
+        }
+
+        // Use SIMD optimization for larger arrays
+        if x.len() >= 16 {
+            use wide::f64x4;
+
+            let chunks = x.chunks_exact(4);
+            let remainder = chunks.remainder();
+
+            // Process chunks of 4 elements using SIMD
+            let mut sum_vec = f64x4::splat(0.0);
+            for chunk in chunks {
+                let vec = f64x4::from_slice(chunk);
+                sum_vec += vec;
+            }
+
+            // Use reduce_add to sum all elements in the vector
+            let mut result = sum_vec.reduce_add();
+
+            // Process remaining elements
+            for &val in remainder {
+                result += val;
+            }
+
+            return result;
+        }
+
+        // Fallback to standard sum for small arrays
+        x.iter().sum()
+    }
+
+    #[inline(always)]
+    fn sum_f16(&self, x: &[half::f16]) -> f64 {
+        if x.is_empty() {
+            return 0.0f64;
+        }
+        f64::from(x.iter().sum::<half::f16>())
+    }
+
+    #[inline(always)]
+    fn sum_bf16(&self, x: &[half::bf16]) -> f64 {
+        if x.is_empty() {
+            return 0.0f64;
+        }
+        f64::from(x.iter().sum::<half::bf16>())
+    }
+    crate::impl_sum_int!(
+        u8 => u64,
+        i8 => i64,
+        u16 => u64,
+        i16 => i64,
+        u32 => u64,
+        i32 => i64,
+        u64 => u128,
+        i64 => i128
+    );
 
     // Mean operations - implemented using macros (sum / n)
     crate::impl_mean_float!(f32, f64);
     crate::impl_mean_int!(i8, i16, i32, i64, u8, u16, u32, u64);
     crate::impl_mean_half!();
-
-    crate::impl_v_pow!(f32, f64);
 
     #[inline(always)]
     fn nrm2_f64(&self, a: &[f64]) -> f64 {
@@ -260,15 +357,14 @@ pub trait OpsTrait: Send + Sync {
 
         // Use numerically stable implementation, avoid temporary vector allocation
         for (i, &xi) in x.iter().enumerate() {
-            let x_f32 = xi.to_f32();
-            if x_f32 >= 0.0 {
+            if xi >= half::f16::ZERO {
                 // x >= 0: 1 / (1 + exp(-x))
-                let exp_neg_x = (-x_f32).exp();
-                out[i] = half::f16::from_f32(1.0 / (1.0 + exp_neg_x));
+                let exp_neg_xi = half::f16::from_f32((-xi.to_f32()).exp());
+                out[i] = half::f16::ONE / (half::f16::ONE + exp_neg_xi);
             } else {
                 // x < 0: exp(x) / (1 + exp(x))
-                let exp_x = x_f32.exp();
-                out[i] = half::f16::from_f32(exp_x / (1.0 + exp_x));
+                let exp_xi = half::f16::from_f32(xi.to_f32().exp());
+                out[i] = exp_xi / (half::f16::ONE + exp_xi);
             }
         }
     }
@@ -283,15 +379,14 @@ pub trait OpsTrait: Send + Sync {
 
         // Use numerically stable implementation, avoid temporary vector allocation
         for (i, &xi) in x.iter().enumerate() {
-            let x_f32 = xi.to_f32();
-            if x_f32 >= 0.0 {
+            if xi >= half::bf16::ZERO {
                 // x >= 0: 1 / (1 + exp(-x))
-                let exp_neg_x = (-x_f32).exp();
-                out[i] = half::bf16::from_f32(1.0 / (1.0 + exp_neg_x));
+                let exp_neg_xi = half::bf16::from_f32((-xi.to_f32()).exp());
+                out[i] = half::bf16::ONE / (half::bf16::ONE + exp_neg_xi);
             } else {
                 // x < 0: exp(x) / (1 + exp(x))
-                let exp_x = x_f32.exp();
-                out[i] = half::bf16::from_f32(exp_x / (1.0 + exp_x));
+                let exp_xi = half::bf16::from_f32(xi.to_f32().exp());
+                out[i] = exp_xi / (half::bf16::ONE + exp_xi);
             }
         }
     }
@@ -307,7 +402,7 @@ pub trait OpsTrait: Send + Sync {
 
         // Implement clamp: min(max(x, min), max) - single pass
         for (i, xi) in x.iter().enumerate() {
-            out[i] = xi.max(min).min(max);
+            out[i] = xi.clamp(min, max);
         }
     }
 
@@ -321,7 +416,7 @@ pub trait OpsTrait: Send + Sync {
 
         // Implement clamp: min(max(x, min), max) - single pass
         for (i, xi) in x.iter().enumerate() {
-            out[i] = xi.max(min).min(max);
+            out[i] = xi.clamp(min, max);
         }
     }
 
@@ -335,10 +430,7 @@ pub trait OpsTrait: Send + Sync {
 
         // For f16, convert to f32 for calculation, then convert back to f16 - single pass
         for (i, xi) in x.iter().enumerate() {
-            let x_f32 = xi.to_f32();
-            let min_f32 = min.to_f32();
-            let max_f32 = max.to_f32();
-            out[i] = half::f16::from_f32(x_f32.max(min_f32).min(max_f32));
+            out[i] = xi.clamp(min, max);
         }
     }
 
@@ -358,10 +450,7 @@ pub trait OpsTrait: Send + Sync {
 
         // For bf16, convert to f32 for calculation, then convert back to bf16 - single pass
         for (i, xi) in x.iter().enumerate() {
-            let x_f32 = xi.to_f32();
-            let min_f32 = min.to_f32();
-            let max_f32 = max.to_f32();
-            out[i] = half::bf16::from_f32(x_f32.max(min_f32).min(max_f32));
+            out[i] = xi.clamp(min, max);
         }
     }
 
@@ -374,7 +463,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -386,7 +475,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -398,7 +487,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -410,7 +499,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -422,7 +511,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -434,7 +523,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -446,7 +535,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 
@@ -458,7 +547,7 @@ pub trait OpsTrait: Send + Sync {
             "Input and output slices must have same length"
         );
         for (i, xi) in x.iter().enumerate() {
-            out[i] = (*xi).max(min).min(max);
+            out[i] = (*xi).clamp(min, max);
         }
     }
 }

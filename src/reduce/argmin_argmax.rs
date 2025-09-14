@@ -23,11 +23,12 @@ impl<S: StorageTrait> TensorBase<S> {
             anyhow::bail!("Cannot find argmin/argmax of dimension with size 0");
         }
 
-        if self.is_contiguous() && dim_index == self.rank() - 1 {
+        // Use dimension-agnostic optimization when possible
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_index]) {
             let backend = global_backend();
-            let reduce_size = self.shape()[dim_index];
+            let shape = self.shape();
+            let reduce_size = shape[dim_index];
             let output_size = self.numel() / reduce_size;
-
             let (new_shape, _) =
                 crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 
@@ -347,8 +348,7 @@ impl<S: StorageTrait> TensorBase<S> {
                 _ => anyhow::bail!("Argmin/Argmax not supported for dtype {:?}", self.dtype()),
             }
         } else {
-            let (new_shape, _) =
-                crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
+            let (new_shape, _) = crate::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 
             let result_size = new_shape.iter().product();
             macro_rules! noncontig_argmin_argmax {

@@ -1,4 +1,48 @@
-use crate::{Shape, Stride};
+use crate::{Shape, StorageTrait, Stride, TensorBase};
+
+impl<S: StorageTrait> TensorBase<S> {
+    /// Check if we can reduce over dimensions efficiently using contiguous memory access
+    pub fn can_reduce_over_last_dims(&self, dim_indices: &[usize]) -> bool {
+        if dim_indices.is_empty() {
+            return false;
+        }
+        let shape = self.shape();
+
+        // For dimension-agnostic optimization, we can use contiguous path for:
+        // 1. Single dimension reductions (any dimension)
+        // 2. Multiple consecutive dimensions ending at the last dimension
+        // 3. Any reduction that can benefit from SIMD optimization
+        if dim_indices.len() == 1 {
+            // Single dimension reduction - always use contiguous path for better performance
+            let reduce_size = shape[dim_indices[0]];
+            return reduce_size >= 4; // SIMD threshold
+        }
+
+        // For multiple dimensions, check if they form a consecutive block
+        let mut sorted_dims = dim_indices.to_vec();
+        sorted_dims.sort_unstable();
+
+        // Check if all dimensions are consecutive
+        let mut consecutive = true;
+        for i in 1..sorted_dims.len() {
+            if sorted_dims[i] != sorted_dims[i - 1] + 1 {
+                consecutive = false;
+                break;
+            }
+        }
+
+        if consecutive {
+            // For consecutive dimensions, prefer contiguous path for better cache locality
+            let reduce_size: usize = sorted_dims.iter().map(|&dim| shape[dim]).product();
+            return reduce_size >= 4;
+        }
+
+        // Even non-consecutive dimensions can benefit from contiguous optimization
+        // if the total reduction size is large enough
+        let total_reduce_size: usize = dim_indices.iter().map(|&dim| shape[dim]).product();
+        total_reduce_size >= 16 // Higher threshold for non-consecutive dims
+    }
+}
 
 pub fn reduce_shape_stride(shape: Shape, dims: &[usize], keepdim: bool) -> (Shape, Stride) {
     let ndim = shape.len();

@@ -19,7 +19,8 @@ impl<S: StorageTrait> TensorBase<S> {
             anyhow::bail!("Cannot find min/max of empty tensor");
         }
 
-        if self.is_contiguous() && dim_index == self.rank() - 1 {
+        // Use dimension-agnostic optimization for contiguous tensors when reducing over last dimensions
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_index]) {
             self.min_max_contiguous(dim_index, keepdim)
         } else {
             self.min_max_non_contiguous(dim_index, keepdim)
@@ -28,9 +29,9 @@ impl<S: StorageTrait> TensorBase<S> {
 
     fn min_max_contiguous(&self, dim_index: usize, keepdim: bool) -> Result<(Tensor, Tensor)> {
         let backend = global_backend();
-        let reduce_size = self.shape()[dim_index];
+        let shape = self.shape();
+        let reduce_size = shape[dim_index];
         let output_size = self.numel() / reduce_size;
-
         let (new_shape, _) = crate::reduce::reduce_shape_stride(self.shape, &[dim_index], keepdim);
 
         match self.dtype() {
@@ -67,7 +68,6 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut out_max = UninitVec::<f64>::new(output_size);
                 let dst_min = out_min.as_mut_slice();
                 let dst_max = out_max.as_mut_slice();
-
                 for (i, (a, b)) in dst_min
                     .iter_mut()
                     .zip(dst_max.iter_mut())

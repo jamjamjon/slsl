@@ -107,7 +107,7 @@ fn create_candle_tensor_3d_f32(d1: usize, d2: usize, d3: usize) -> CandleTensor 
 }
 
 fn bench_1d_softmax_f32_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("1d_softmax_f32_comparison");
+    let mut group = c.benchmark_group("1d_softmax_f32");
     group.measurement_time(Duration::from_secs(10));
 
     for &size in SIZES_1D {
@@ -132,7 +132,7 @@ fn bench_1d_softmax_f32_comparison(c: &mut Criterion) {
 }
 
 fn bench_1d_softmax_f64_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("1d_softmax_f64_comparison");
+    let mut group = c.benchmark_group("1d_softmax_f64");
     group.measurement_time(Duration::from_secs(10));
 
     for &size in SIZES_1D {
@@ -157,7 +157,7 @@ fn bench_1d_softmax_f64_comparison(c: &mut Criterion) {
 }
 
 fn bench_1d_softmax_f16_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("1d_softmax_f16_comparison");
+    let mut group = c.benchmark_group("1d_softmax_f16");
     group.measurement_time(Duration::from_secs(10));
 
     for &size in SIZES_1D {
@@ -182,7 +182,7 @@ fn bench_1d_softmax_f16_comparison(c: &mut Criterion) {
 }
 
 fn bench_2d_softmax_f32_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("2d_softmax_f32_comparison");
+    let mut group = c.benchmark_group("2d_softmax_f32");
     group.measurement_time(Duration::from_secs(10));
 
     for &(rows, cols) in SIZES_2D {
@@ -240,7 +240,7 @@ fn bench_2d_softmax_f32_comparison(c: &mut Criterion) {
 }
 
 fn bench_2d_softmax_f16_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("2d_softmax_f16_comparison");
+    let mut group = c.benchmark_group("2d_softmax_f16");
     group.measurement_time(Duration::from_secs(10));
 
     for &(rows, cols) in SIZES_2D {
@@ -295,7 +295,7 @@ fn bench_2d_softmax_f16_comparison(c: &mut Criterion) {
 }
 
 fn bench_3d_softmax_f16_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("3d_softmax_f16_comparison");
+    let mut group = c.benchmark_group("3d_softmax_f16");
     group.measurement_time(Duration::from_secs(10));
 
     for &(d1, d2, d3) in SIZES_3D {
@@ -330,7 +330,7 @@ fn bench_3d_softmax_f16_comparison(c: &mut Criterion) {
 }
 
 fn bench_3d_softmax_f32_comparison(c: &mut Criterion) {
-    let mut group = c.benchmark_group("3d_softmax_f32_comparison");
+    let mut group = c.benchmark_group("3d_softmax_f32");
     group.measurement_time(Duration::from_secs(10));
 
     for &(d1, d2, d3) in SIZES_3D {

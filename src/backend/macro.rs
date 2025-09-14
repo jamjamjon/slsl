@@ -373,16 +373,15 @@ macro_rules! impl_gemm_half {
             c: *mut half::bf16,
             ldc: usize,
         ) {
-            // Simple matrix multiplication implementation for bf16
             for i in 0..m {
                 for j in 0..n {
-                    let mut sum = 0.0f32;
+                    let mut sum = half::bf16::ZERO;
                     for l in 0..k {
-                        let a_val = (*a.add(i * lda + l)).to_f32();
-                        let b_val = (*b.add(l * ldb + j)).to_f32();
+                        let a_val = (*a.add(i * lda + l));
+                        let b_val = (*b.add(l * ldb + j));
                         sum += a_val * b_val;
                     }
-                    *c.add(i * ldc + j) = half::bf16::from_f32(sum);
+                    *c.add(i * ldc + j) = sum;
                 }
             }
         }
@@ -735,8 +734,7 @@ macro_rules! impl_v_sqr_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                let val = xi.to_f32();
-                *o = half::f16::from_f32(val * val);
+                *o = xi * xi;
             }
         }
 
@@ -748,8 +746,7 @@ macro_rules! impl_v_sqr_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                let val = xi.to_f32();
-                *o = half::bf16::from_f32(val * val);
+                *o = xi * xi;
             }
         }
     };
@@ -791,7 +788,7 @@ macro_rules! impl_v_add_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::f16::from_f32(ai.to_f32() + bi.to_f32());
+                *o = ai + bi;
             }
         }
 
@@ -804,7 +801,7 @@ macro_rules! impl_v_add_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::bf16::from_f32(ai.to_f32() + bi.to_f32());
+                *o = ai + bi;
             }
         }
     };
@@ -846,7 +843,7 @@ macro_rules! impl_v_sub_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::f16::from_f32(ai.to_f32() - bi.to_f32());
+                *o = ai - bi;
             }
         }
 
@@ -859,7 +856,7 @@ macro_rules! impl_v_sub_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::bf16::from_f32(ai.to_f32() - bi.to_f32());
+                *o = ai - bi;
             }
         }
     };
@@ -901,7 +898,7 @@ macro_rules! impl_v_mul_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::f16::from_f32(ai.to_f32() * bi.to_f32());
+                *o = (*ai) * (*bi);
             }
         }
 
@@ -914,7 +911,7 @@ macro_rules! impl_v_mul_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::bf16::from_f32(ai.to_f32() * bi.to_f32());
+                *o = (*ai) * (*bi);
             }
         }
     };
@@ -956,7 +953,7 @@ macro_rules! impl_v_div_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::f16::from_f32(ai.to_f32() / bi.to_f32());
+                *o = (*ai) / (*bi);
             }
         }
 
@@ -969,7 +966,7 @@ macro_rules! impl_v_div_half {
                 "Input and output slices must have same length"
             );
             for ((o, ai), bi) in out.iter_mut().zip(a.iter()).zip(b.iter()) {
-                *o = half::bf16::from_f32(ai.to_f32() / bi.to_f32());
+                *o = (*ai) / (*bi);
             }
         }
     };
@@ -1009,7 +1006,7 @@ macro_rules! impl_v_div_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(xi.to_f32() / scalar.to_f32());
+                *o = (*xi) / scalar;
             }
         }
 
@@ -1021,7 +1018,7 @@ macro_rules! impl_v_div_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(xi.to_f32() / scalar.to_f32());
+                *o = (*xi) / scalar;
             }
         }
     };
@@ -1113,7 +1110,7 @@ macro_rules! impl_v_recip_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(1.0 / xi.to_f32());
+                *o = half::f16::ONE / xi;
             }
         }
 
@@ -1125,7 +1122,7 @@ macro_rules! impl_v_recip_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(1.0 / xi.to_f32());
+                *o = half::bf16::ONE / xi;
             }
         }
     };
@@ -1373,7 +1370,7 @@ macro_rules! impl_v_neg_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(-xi.to_f32());
+                *o = -(*xi);
             }
         }
 
@@ -1385,7 +1382,7 @@ macro_rules! impl_v_neg_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(-xi.to_f32());
+                *o = -(*xi);
             }
         }
     };
@@ -1397,8 +1394,8 @@ macro_rules! impl_v_pow {
     ($($t:ty),+) => {
         $(
             paste::paste! {
-    #[inline(always)]
-    fn [<v_pow_ $t>](&self, a: &[$t], b: &[$t], out: &mut [$t]) {
+                #[inline(always)]
+                fn [<v_pow_ $t>](&self, a: &[$t], b: &[$t], out: &mut [$t]) {
                     assert_eq!(a.len(), b.len(), "Input slices must have same length");
                     assert_eq!(
                         a.len(),
@@ -1414,7 +1411,6 @@ macro_rules! impl_v_pow {
     };
 }
 
-// TODO: rename
 /// Generate vectorized ReLU operation for floating point types
 #[macro_export]
 macro_rules! impl_relu {
@@ -1437,7 +1433,6 @@ macro_rules! impl_relu {
     };
 }
 
-// TODO: rename
 /// Generate vectorized ReLU operation for integer types
 #[macro_export]
 macro_rules! impl_relu_int {
@@ -1460,7 +1455,6 @@ macro_rules! impl_relu_int {
     };
 }
 
-// TODO: rename
 /// Generate vectorized ReLU operation for unsigned integer types
 #[macro_export]
 macro_rules! impl_relu_uint {
@@ -1483,7 +1477,6 @@ macro_rules! impl_relu_uint {
     };
 }
 
-// TODO: rename
 /// Generate vectorized ReLU operation for half precision types
 #[macro_export]
 macro_rules! impl_relu_half {
@@ -1496,7 +1489,7 @@ macro_rules! impl_relu_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(xi.to_f32().max(0.0));
+                *o = xi.max(half::f16::ZERO);
             }
         }
 
@@ -1508,86 +1501,31 @@ macro_rules! impl_relu_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(xi.to_f32().max(0.0));
+                *o = xi.max(half::bf16::ZERO);
             }
         }
-    };
-}
-
-/// Generate sum operations for floating point types
-#[macro_export]
-macro_rules! impl_sum_float {
-    ($($t:ty),+) => {
-        $(
-            paste::paste! {
-                #[inline(always)]
-                fn [<sum_ $t>](&self, x: &[$t]) -> $t {
-                    if x.is_empty() {
-                        return 0 as $t;
-                    }
-                    x.iter().sum()
-                }
-            }
-        )+
     };
 }
 
 /// Generate sum operations for integer types
 #[macro_export]
 macro_rules! impl_sum_int {
-    ($($t:ty),+) => {
+    ($($t:ty => $acc:ty),+) => {
         $(
             paste::paste! {
                 #[inline(always)]
                 fn [<sum_ $t>](&self, x: &[$t]) -> f64 {
                     if x.is_empty() {
-                        return 0.0f64;
+                        return 0.0;
                     }
-                    // Convert to f64 to avoid overflow
-                    x.iter().map(|&val| val as f64).sum()
+                    let mut sum: $acc = 0;
+                    for &val in x {
+                        sum += val as $acc;
+                    }
+                    sum as f64
                 }
             }
         )+
-    };
-}
-
-/// Generate sum operations for all numeric types
-#[macro_export]
-macro_rules! impl_sum {
-    ($($t:ty),+) => {
-        $(
-            paste::paste! {
-                #[inline(always)]
-                fn [<sum_ $t>](&self, x: &[$t]) -> $t {
-                    if x.is_empty() {
-                        return 0 as $t;
-                    }
-                    x.iter().sum()
-                }
-            }
-        )+
-    };
-}
-
-/// Generate sum operations for half precision types
-#[macro_export]
-macro_rules! impl_sum_half {
-    () => {
-        #[inline(always)]
-        fn sum_f16(&self, x: &[half::f16]) -> f64 {
-            if x.is_empty() {
-                return 0.0f64;
-            }
-            x.iter().map(|xi| xi.to_f64()).sum()
-        }
-
-        #[inline(always)]
-        fn sum_bf16(&self, x: &[half::bf16]) -> f64 {
-            if x.is_empty() {
-                return 0.0f64;
-            }
-            x.iter().map(|xi| xi.to_f64()).sum()
-        }
     };
 }
 
@@ -1687,7 +1625,7 @@ macro_rules! impl_v_add_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(xi.to_f32() + scalar.to_f32());
+                *o = *xi + scalar;
             }
         }
 
@@ -1699,7 +1637,7 @@ macro_rules! impl_v_add_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(xi.to_f32() + scalar.to_f32());
+                *o = *xi + scalar;
             }
         }
     };
@@ -1739,7 +1677,7 @@ macro_rules! impl_v_sub_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(xi.to_f32() - scalar.to_f32());
+                *o = *xi - scalar;
             }
         }
 
@@ -1751,7 +1689,7 @@ macro_rules! impl_v_sub_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(xi.to_f32() - scalar.to_f32());
+                *o = *xi - scalar;
             }
         }
     };
@@ -1791,7 +1729,7 @@ macro_rules! impl_v_mul_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::f16::from_f32(xi.to_f32() * scalar.to_f32());
+                *o = *xi * scalar;
             }
         }
 
@@ -1803,7 +1741,7 @@ macro_rules! impl_v_mul_scalar_half {
                 "Input and output slices must have same length"
             );
             for (o, xi) in out.iter_mut().zip(x.iter()) {
-                *o = half::bf16::from_f32(xi.to_f32() * scalar.to_f32());
+                *o = *xi * scalar;
             }
         }
     };

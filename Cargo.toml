@@ -53,10 +53,6 @@ name = "bench_unary"
 harness = false
 
 [[bench]]
-name = "bench_norm"
-harness = false
-
-[[bench]]
 name = "bench_min_max"
 harness = false
 

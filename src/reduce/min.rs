@@ -117,14 +117,11 @@ impl<S: StorageTrait> TensorBase<S> {
 
     pub fn min_impl<D: Dim + Clone>(&self, dim: D, keepdim: bool) -> Result<Tensor> {
         let dim_index = dim.to_dim(self.rank())?;
-
         if self.numel() == 0 {
             anyhow::bail!("Cannot find min of empty tensor");
         }
-
         let (new_shape, new_strides) = reduce_shape_stride(self.shape, &[dim_index], keepdim);
-
-        if self.is_contiguous() && dim_index == self.rank() - 1 {
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_index]) {
             self.min_contiguous(dim_index, new_shape)
         } else {
             self.min_non_contiguous(dim_index, new_shape, new_strides)
@@ -133,16 +130,20 @@ impl<S: StorageTrait> TensorBase<S> {
 
     fn min_contiguous(&self, dim_index: usize, new_shape: Shape) -> Result<Tensor> {
         let backend = global_backend();
-        let reduce_size = self.shape()[dim_index];
+        let shape = self.shape();
+
+        // Calculate reduction parameters for dimension-agnostic optimization
+        let reduce_size = shape[dim_index];
         let output_size = self.numel() / reduce_size;
+        let stride = reduce_size;
 
         match self.dtype() {
             DType::Fp32 => {
                 let data = self.as_slice::<f32>()?;
                 let output = UninitVec::<f32>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_f32(&data[start..end]);
                     }
                 });
@@ -153,8 +154,8 @@ impl<S: StorageTrait> TensorBase<S> {
                 let data = self.as_slice::<f64>()?;
                 let output = UninitVec::<f64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_f64(&data[start..end]);
                     }
                 });
@@ -162,11 +163,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Fp16 => {
                 let data = self.as_slice::<f16>()?;
-
                 let output = UninitVec::<f16>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_f16(&data[start..end]);
                     }
                 });
@@ -174,11 +174,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Bf16 => {
                 let data = self.as_slice::<bf16>()?;
-
                 let output = UninitVec::<bf16>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_bf16(&data[start..end]);
                     }
                 });
@@ -186,11 +185,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Int8 => {
                 let data = self.as_slice::<i8>()?;
-
                 let output = UninitVec::<i8>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_i8(&data[start..end]);
                     }
                 });
@@ -198,11 +196,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Int16 => {
                 let data = self.as_slice::<i16>()?;
-
                 let output = UninitVec::<i16>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_i16(&data[start..end]);
                     }
                 });
@@ -210,11 +207,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Int32 => {
                 let data = self.as_slice::<i32>()?;
-
                 let output = UninitVec::<i32>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_i32(&data[start..end]);
                     }
                 });
@@ -222,11 +218,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Int64 => {
                 let data = self.as_slice::<i64>()?;
-
                 let output = UninitVec::<i64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_i64(&data[start..end]);
                     }
                 });
@@ -234,11 +229,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Uint8 => {
                 let data = self.as_slice::<u8>()?;
-
                 let output = UninitVec::<u8>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_u8(&data[start..end]);
                     }
                 });
@@ -246,11 +240,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Uint16 => {
                 let data = self.as_slice::<u16>()?;
-
                 let output = UninitVec::<u16>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_u16(&data[start..end]);
                     }
                 });
@@ -258,11 +251,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Uint32 => {
                 let data = self.as_slice::<u32>()?;
-
                 let output = UninitVec::<u32>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_u32(&data[start..end]);
                     }
                 });
@@ -270,11 +262,10 @@ impl<S: StorageTrait> TensorBase<S> {
             }
             DType::Uint64 => {
                 let data = self.as_slice::<u64>()?;
-
                 let output = UninitVec::<u64>::new(output_size).init_with(|dst_to_set| {
                     for (i, item) in dst_to_set.iter_mut().enumerate().take(output_size) {
-                        let start = i * reduce_size;
-                        let end = start + reduce_size;
+                        let start = i * stride;
+                        let end = start + stride;
                         *item = backend.min_v_u64(&data[start..end]);
                     }
                 });

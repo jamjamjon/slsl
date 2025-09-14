@@ -25,6 +25,7 @@ impl<S: StorageTrait> TensorBase<S> {
     /// let x = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [3]).unwrap();
     /// let result = x.softmax(-1).unwrap();
     /// ```
+    #[inline(always)]
     pub fn softmax<D: Dim>(&self, dim: D) -> Result<Tensor> {
         let dim_idx = dim.to_dim(self.rank())?;
 
@@ -62,51 +63,40 @@ impl<S: StorageTrait> TensorBase<S> {
     where
         T: num_traits::Float + Copy + Send + Sync + 'static + TensorElement,
     {
-        // For 1D tensors (most common case)
         if self.rank() == 1 && dim_idx == 0 {
             return self.softmax_1d::<T>();
         }
-
-        // For contiguous tensors with softmax along the last dimension
-        if self.is_contiguous() && dim_idx == self.rank() - 1 {
+        if self.is_contiguous() && self.can_reduce_over_last_dims(&[dim_idx]) {
             let dims = self.dims();
-            let last_dim_size = dims[dims.len() - 1];
-            let batch_size = self.numel() / last_dim_size;
-            return self.softmax_contiguous_last_dim::<T>(batch_size, last_dim_size);
+            let reduce_size = dims[dim_idx];
+            let batch_size = self.numel() / reduce_size;
+            return self.softmax_contiguous::<T>(batch_size, reduce_size);
         }
-
-        // Fallback to general implementation
         self.softmax_general::<T>(dim_idx)
     }
 
-    /// Softmax implementation for contiguous tensors with softmax along the last dimension
-    fn softmax_contiguous_last_dim<T>(
-        &self,
-        batch_size: usize,
-        last_dim_size: usize,
-    ) -> Result<Tensor>
+    #[inline(always)]
+    fn softmax_contiguous<T>(&self, batch_size: usize, stride: usize) -> Result<Tensor>
     where
         T: Copy + 'static + TensorElement + num_traits::Float,
     {
         match T::DTYPE {
             crate::DType::Fp32 => {
-                // Always use f32x8 - wide library will handle degradation automatically
                 let f32_data = self.as_slice::<f32>()?;
                 let result_data =
-                    self.softmax_contiguous_simd::<f32x8>(f32_data, batch_size, last_dim_size);
+                    self.softmax_contiguous_simd::<f32x8>(f32_data, batch_size, stride);
                 Tensor::from_vec(result_data, self.dims())
             }
             crate::DType::Fp64 => {
                 let f64_data = self.as_slice::<f64>()?;
                 let result_data =
-                    self.softmax_contiguous_simd::<f64x4>(f64_data, batch_size, last_dim_size);
+                    self.softmax_contiguous_simd::<f64x4>(f64_data, batch_size, stride);
                 Tensor::from_vec(result_data, self.dims())
             }
             crate::DType::Fp16 => {
                 let f16_data = self.as_slice::<half::f16>()?;
                 let f32_data: Vec<f32> = f16_data.iter().map(|&x| x.to_f32()).collect();
-                let f32_data =
-                    self.softmax_contiguous_simd::<f32x8>(&f32_data, batch_size, last_dim_size);
+                let f32_data = self.softmax_contiguous_simd::<f32x8>(&f32_data, batch_size, stride);
                 let f16_result: Vec<half::f16> =
                     f32_data.iter().map(|&x| half::f16::from_f32(x)).collect();
                 Tensor::from_vec(f16_result, self.dims())
@@ -115,8 +105,7 @@ impl<S: StorageTrait> TensorBase<S> {
                 let bf16_data = self.as_slice::<half::bf16>()?;
                 let len = bf16_data.len();
                 let f32_data: Vec<f32> = bf16_data.iter().map(|&x| x.to_f32()).collect();
-                let f32_data =
-                    self.softmax_contiguous_simd::<f32x8>(&f32_data, batch_size, last_dim_size);
+                let f32_data = self.softmax_contiguous_simd::<f32x8>(&f32_data, batch_size, stride);
                 let bf16_result = UninitVec::new(len).init_with(|result_slice| {
                     for (i, &f32_val) in f32_data.iter().enumerate() {
                         result_slice[i] = half::bf16::from_f32(f32_val);
@@ -134,6 +123,7 @@ impl<S: StorageTrait> TensorBase<S> {
     }
 
     /// 1D softmax
+    #[inline(always)]
     fn softmax_1d<T>(&self) -> Result<Tensor>
     where
         T: num_traits::Float + Copy + Send + Sync + 'static + TensorElement,
@@ -198,8 +188,12 @@ impl<S: StorageTrait> TensorBase<S> {
                     sum = sum + exp_val;
                 }
 
-                // Normalize
-                let inv_sum = Simd::Element::ONE / sum;
+                // Normalize with numerical stability check
+                let inv_sum = if sum > Simd::Element::ZERO {
+                    Simd::Element::ONE / sum
+                } else {
+                    Simd::Element::ZERO
+                };
                 for val in result_slice.iter_mut() {
                     *val = *val * inv_sum;
                 }
@@ -244,8 +238,12 @@ impl<S: StorageTrait> TensorBase<S> {
                 sum = sum + exp_val;
             }
 
-            // Pass 3: Normalize
-            let inv_sum = Simd::Element::ONE / sum;
+            // Pass 3: Normalize with numerical stability check
+            let inv_sum = if sum > Simd::Element::ZERO {
+                Simd::Element::ONE / sum
+            } else {
+                Simd::Element::ZERO
+            };
             let inv_sum_vec = Simd::splat(inv_sum);
             for chunk_idx in 0..chunks {
                 let start = chunk_idx * Simd::LANE;
@@ -265,24 +263,27 @@ impl<S: StorageTrait> TensorBase<S> {
         &self,
         data: &[Simd::Element],
         batch_size: usize,
-        last_dim_size: usize,
+        stride: usize,
     ) -> Vec<Simd::Element>
     where
         Simd: WideSimd,
         Simd::Element: std::iter::Sum<Simd::Element>,
     {
         UninitVec::new(self.numel()).init_with(|result_slice: &mut [Simd::Element]| {
-            let chunks_per_batch = last_dim_size / Simd::LANE;
+            let chunks_per_batch = stride / Simd::LANE;
             for batch_idx in 0..batch_size {
-                let batch_start = batch_idx * last_dim_size;
-                let batch_end = batch_start + last_dim_size;
+                let batch_start = batch_idx * stride;
+                let batch_end = batch_start + stride;
 
                 // Find maximum using SIMD
                 let mut max_vec = Simd::NEG_INFINITY;
                 for chunk_idx in 0..chunks_per_batch {
                     let chunk_start = batch_start + chunk_idx * Simd::LANE;
-                    let chunk = unsafe { Simd::from_slice_unaligned(&data[chunk_start..]) };
-                    max_vec = max_vec.max(chunk);
+                    let chunk_end = chunk_start + Simd::LANE;
+                    if chunk_end <= batch_end && chunk_end <= data.len() {
+                        let chunk = unsafe { Simd::from_slice_unaligned(&data[chunk_start..]) };
+                        max_vec = max_vec.max(chunk);
+                    }
                 }
                 let max_array = max_vec.as_array_ref();
                 let mut max_val = max_array
@@ -291,12 +292,12 @@ impl<S: StorageTrait> TensorBase<S> {
                     .fold(Simd::Element::neg_infinity(), |a, &b| a.max(b));
 
                 // Handle remainder
-                for &val in data
-                    .iter()
-                    .take(batch_end)
-                    .skip(batch_start + chunks_per_batch * Simd::LANE)
-                {
-                    max_val = max_val.max(val);
+                let remainder_start = batch_start + chunks_per_batch * Simd::LANE;
+                let remainder_end = batch_end.min(data.len());
+                if remainder_start < remainder_end {
+                    for &val in data[remainder_start..remainder_end].iter() {
+                        max_val = max_val.max(val);
+                    }
                 }
 
                 // Compute exp and sum using SIMD
@@ -305,45 +306,61 @@ impl<S: StorageTrait> TensorBase<S> {
 
                 for chunk_idx in 0..chunks_per_batch {
                     let chunk_start = batch_start + chunk_idx * Simd::LANE;
-                    let chunk = unsafe { Simd::from_slice_unaligned(&data[chunk_start..]) };
-                    let exp_chunk = (chunk.sub(max_vec)).exp();
-                    let exp_array = exp_chunk.as_array_ref();
-                    result_slice[chunk_start..chunk_start + Simd::LANE]
-                        .copy_from_slice(exp_array.as_ref());
-                    sum_vec = sum_vec.add(exp_chunk);
+                    let chunk_end = chunk_start + Simd::LANE;
+                    if chunk_end <= batch_end && chunk_end <= data.len() {
+                        let chunk = unsafe { Simd::from_slice_unaligned(&data[chunk_start..]) };
+                        let exp_chunk = (chunk.sub(max_vec)).exp();
+                        let exp_array = exp_chunk.as_array_ref();
+                        let result_start = chunk_start - batch_start;
+                        result_slice[result_start..result_start + Simd::LANE]
+                            .copy_from_slice(exp_array.as_ref());
+                        sum_vec = sum_vec.add(exp_chunk);
+                    }
                 }
                 let mut sum = sum_vec.sum();
 
                 // Handle remainder
-                for (idx, &val) in data
-                    .iter()
-                    .enumerate()
-                    .take(batch_end)
-                    .skip(batch_start + chunks_per_batch * Simd::LANE)
-                {
-                    let exp_val = (val - max_val).exp();
-                    result_slice[idx] = exp_val;
-                    sum = sum + exp_val;
+                let remainder_start = batch_start + chunks_per_batch * Simd::LANE;
+                let remainder_end = batch_end.min(data.len());
+                if remainder_start < remainder_end {
+                    for (i, &val) in data[remainder_start..remainder_end].iter().enumerate() {
+                        let exp_val = (val - max_val).exp();
+                        let result_idx = remainder_start - batch_start + i;
+                        result_slice[result_idx] = exp_val;
+                        sum = sum + exp_val;
+                    }
                 }
 
-                // Normalize using SIMD
-                let inv_sum = Simd::Element::ONE / sum;
+                // Normalize using SIMD with numerical stability check
+                let inv_sum = if sum > Simd::Element::ZERO {
+                    Simd::Element::ONE / sum
+                } else {
+                    Simd::Element::ZERO
+                };
                 let inv_sum_vec = Simd::splat(inv_sum);
 
                 for chunk_idx in 0..chunks_per_batch {
                     let chunk_start = batch_start + chunk_idx * Simd::LANE;
-                    let chunk = unsafe { Simd::from_slice_unaligned(&result_slice[chunk_start..]) };
-                    let normalized = chunk.mul(inv_sum_vec);
-                    let norm_array = normalized.as_array_ref();
-                    result_slice[chunk_start..chunk_start + Simd::LANE]
-                        .copy_from_slice(norm_array.as_ref());
+                    let result_start = chunk_start - batch_start;
+                    let result_end = (result_start + Simd::LANE).min(result_slice.len());
+                    if result_end - result_start >= Simd::LANE {
+                        let chunk =
+                            unsafe { Simd::from_slice_unaligned(&result_slice[result_start..]) };
+                        let normalized = chunk.mul(inv_sum_vec);
+                        let norm_array = normalized.as_array_ref();
+                        result_slice[result_start..result_start + Simd::LANE]
+                            .copy_from_slice(norm_array.as_ref());
+                    }
                 }
-                for val in result_slice
-                    .iter_mut()
-                    .take(batch_end)
-                    .skip(batch_start + chunks_per_batch * Simd::LANE)
-                {
-                    *val = *val * inv_sum;
+                let remainder_start = chunks_per_batch * Simd::LANE;
+                let remainder_end = stride;
+                if remainder_start < remainder_end {
+                    for i in remainder_start..remainder_end {
+                        let result_idx = batch_start + i;
+                        if result_idx < result_slice.len() {
+                            result_slice[result_idx] = result_slice[result_idx] * inv_sum;
+                        }
+                    }
                 }
             }
         })

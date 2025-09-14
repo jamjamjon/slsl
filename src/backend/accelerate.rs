@@ -424,14 +424,6 @@ impl OpsTrait for AccelerateBackend {
         result
     }
 
-    // #[inline(always)]
-    // fn sum_bf16(&self, x: &[half::bf16]) -> f64 {
-    //     if x.is_empty() {
-    //         return 0.0f64;
-    //     }
-    //     x.iter().map(|xi| xi.to_f64()).sum()
-    // }
-
     // Mean operations using vDSP_meanv and vDSP_meanvD
     #[inline(always)]
     fn mean_f32(&self, x: &[f32]) -> f32 {

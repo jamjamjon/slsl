@@ -125,27 +125,27 @@ impl OpsTrait for OpenBlasBackend {
         unsafe { cblas_dasum(x.len() as c_int, x.as_ptr(), 1) }
     }
 
-    // Sum operations using sdot with incY=0 and y=1.0
-    #[inline(always)]
-    fn sum_f32(&self, x: &[f32]) -> f32 {
-        if x.is_empty() {
-            return 0.0f32;
-        }
-        // Use sdot with incY=0 and y=1.0 to compute sum
-        // This is equivalent to dot(x, ones) but more efficient
-        let y = 1.0f32;
-        unsafe { cblas_sdot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
-    }
+    // // Sum operations using sdot with incY=0 and y=1.0
+    // #[inline(always)]
+    // fn sum_f32(&self, x: &[f32]) -> f32 {
+    //     if x.is_empty() {
+    //         return 0.0f32;
+    //     }
+    //     // Use sdot with incY=0 and y=1.0 to compute sum
+    //     // This is equivalent to dot(x, ones) but more efficient
+    //     let y = 1.0f32;
+    //     unsafe { cblas_sdot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
+    // }
 
-    #[inline(always)]
-    fn sum_f64(&self, x: &[f64]) -> f64 {
-        if x.is_empty() {
-            return 0.0f64;
-        }
-        // Use ddot with incY=0 and y=1.0 to compute sum
-        let y = 1.0f64;
-        unsafe { cblas_ddot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
-    }
+    // #[inline(always)]
+    // fn sum_f64(&self, x: &[f64]) -> f64 {
+    //     if x.is_empty() {
+    //         return 0.0f64;
+    //     }
+    //     // Use ddot with incY=0 and y=1.0 to compute sum
+    //     let y = 1.0f64;
+    //     unsafe { cblas_ddot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
+    // }
 
     #[inline(always)]
     fn nrm2_f32(&self, x: &[f32]) -> f64 {
