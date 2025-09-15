@@ -3,49 +3,11 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use slsl::Tensor;
 use std::hint::black_box;
 
-// ========== Test Data Generation ==========
-
 fn generate_test_data_f32(size: usize) -> Vec<f32> {
     (0..size).map(|i| (i % 1000) as f32 * 0.1).collect()
 }
 
-// ========== Debug Test ==========
-
-fn debug_permute() {
-    println!("=== Debug Permute ===");
-
-    // Create a simple 2x3 tensor
-    let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-    let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
-
-    println!("Original tensor:");
-    println!("  Shape: {:?}", tensor.shape());
-    println!("  Strides: {:?}", tensor.strides());
-    println!("  Is contiguous: {}", tensor.is_contiguous());
-
-    // Try to permute
-    let permuted = tensor.permute([1, 0]).unwrap();
-    println!("Permuted tensor:");
-    println!("  Shape: {:?}", permuted.shape());
-    println!("  Strides: {:?}", permuted.strides());
-    println!("  Is contiguous: {}", permuted.is_contiguous());
-
-    // Convert to owned tensor
-    let owned = permuted.to_owned().unwrap();
-    println!("Owned permuted tensor:");
-    println!("  Shape: {:?}", owned.shape());
-    println!("  Strides: {:?}", owned.strides());
-    println!("  Is contiguous: {}", owned.is_contiguous());
-
-    println!("=== End Debug ===");
-}
-
-// ========== 1D Contiguous Benchmarks ==========
-
 fn bench_contiguous_1d(c: &mut Criterion) {
-    // Debug permute functionality
-    debug_permute();
-
     let mut group = c.benchmark_group("contiguous_1d");
 
     // Small size

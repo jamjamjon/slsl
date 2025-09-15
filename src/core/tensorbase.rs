@@ -295,6 +295,11 @@ impl<S: StorageTrait> TensorBase<S> {
         self.shape.numel()
     }
 
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.numel() == 0
+    }
+
     /// Returns the data type of the tensor elements.
     ///
     /// # Returns

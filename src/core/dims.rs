@@ -113,7 +113,7 @@ impl Dim for isize {
     /// ```
     fn to_dim(&self, rank: usize) -> Result<usize> {
         if rank == 0 {
-            anyhow::bail!("Cannot index into a 0-dimensional tensor");
+            return Ok(0);
         }
         let rank_isize = rank as isize;
         let idx = if *self < 0 { rank_isize + *self } else { *self };
@@ -153,7 +153,7 @@ impl Dim for usize {
     /// ```
     fn to_dim(&self, rank: usize) -> Result<usize> {
         if rank == 0 {
-            anyhow::bail!("Cannot index into a 0-dimensional tensor");
+            return Ok(0);
         }
         if *self >= rank {
             anyhow::bail!(

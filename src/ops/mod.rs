@@ -1,9 +1,11 @@
 mod broadcast;
 mod cat;
 mod flatten;
+mod normalize;
 mod permute;
 mod reshape;
 mod split;
 mod squeeze;
 mod stack;
+mod standardize;
 mod tile;
