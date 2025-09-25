@@ -1,7 +1,7 @@
 use crate::OpsTrait;
 use std::os::raw::{c_double, c_float, c_int};
 
-use super::cblas_consts::{CBLAS_NO_TRANS, CBLAS_ROW_MAJOR};
+use super::cblas_consts::{CBLAS_COL_MAJOR, CBLAS_NO_TRANS};
 
 #[link(name = "openblas")]
 extern "C" {
@@ -125,28 +125,6 @@ impl OpsTrait for OpenBlasBackend {
         unsafe { cblas_dasum(x.len() as c_int, x.as_ptr(), 1) }
     }
 
-    // // Sum operations using sdot with incY=0 and y=1.0
-    // #[inline(always)]
-    // fn sum_f32(&self, x: &[f32]) -> f32 {
-    //     if x.is_empty() {
-    //         return 0.0f32;
-    //     }
-    //     // Use sdot with incY=0 and y=1.0 to compute sum
-    //     // This is equivalent to dot(x, ones) but more efficient
-    //     let y = 1.0f32;
-    //     unsafe { cblas_sdot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
-    // }
-
-    // #[inline(always)]
-    // fn sum_f64(&self, x: &[f64]) -> f64 {
-    //     if x.is_empty() {
-    //         return 0.0f64;
-    //     }
-    //     // Use ddot with incY=0 and y=1.0 to compute sum
-    //     let y = 1.0f64;
-    //     unsafe { cblas_ddot(x.len() as c_int, x.as_ptr(), 1, &y, 0) }
-    // }
-
     #[inline(always)]
     fn nrm2_f32(&self, x: &[f32]) -> f64 {
         if x.is_empty() {
@@ -186,21 +164,32 @@ impl OpsTrait for OpenBlasBackend {
         c: *mut f32,
         ldc: usize,
     ) {
+        // CBLAS GEMM computes: C = alpha * A * B + beta * C
+        //
+        // Problem: slsl uses row-major storage, but OpenBLAS CblasRowMajor has issues on macOS
+        // Solution: Use transpose trick with CblasColMajor
+        //
+        // For row-major A(m,k) * B(k,n) = C(m,n), we compute:
+        // C^T = B^T * A^T using column-major layout
+        // This gives us: (B^T * A^T)^T = A * B = C
+        //
+        // So we swap A and B, and swap m and n in the call:
+        // cblas_sgemm(ColMajor, NoTrans, NoTrans, n, m, k, 1.0, B, ldb, A, lda, 0.0, C, ldc)
         cblas_sgemm(
-            CBLAS_ROW_MAJOR,
-            CBLAS_NO_TRANS,
-            CBLAS_NO_TRANS,
-            m as c_int,
-            n as c_int,
-            k as c_int,
-            1.0f32,
-            a,
-            lda as c_int,
-            b,
-            ldb as c_int,
-            0.0f32,
-            c,
-            ldc as c_int,
+            CBLAS_COL_MAJOR, // Column-major storage order
+            CBLAS_NO_TRANS,  // B^T is not transposed (but we're passing B)
+            CBLAS_NO_TRANS,  // A^T is not transposed (but we're passing A)
+            n as c_int,      // Number of rows in B^T (cols in B) = n
+            m as c_int,      // Number of columns in A^T (rows in A) = m
+            k as c_int,      // Inner dimension k
+            1.0f32,          // alpha: coefficient for B*A
+            b,               // B: second input matrix (k x n) -> treated as B^T (n x k)
+            ldb as c_int,    // ldb: leading dimension of B (k for row-major B)
+            a,               // A: first input matrix (m x k) -> treated as A^T (k x m)
+            lda as c_int,    // lda: leading dimension of A (k for row-major A)
+            0.0f32,          // beta: coefficient for existing C (0 to overwrite)
+            c,               // C: output matrix (m x n) -> treated as C^T (n x m)
+            ldc as c_int,    // ldc: leading dimension of C (n for row-major C)
         );
     }
 
@@ -217,25 +206,35 @@ impl OpsTrait for OpenBlasBackend {
         c: *mut f64,
         ldc: usize,
     ) {
+        // CBLAS GEMM computes: C = alpha * A * B + beta * C
+        //
+        // Problem: slsl uses row-major storage, but OpenBLAS CblasRowMajor has issues on macOS
+        // Solution: Use transpose trick with CblasColMajor
+        //
+        // For row-major A(m,k) * B(k,n) = C(m,n), we compute:
+        // C^T = B^T * A^T using column-major layout
+        // This gives us: (B^T * A^T)^T = A * B = C
+        //
+        // So we swap A and B, and swap m and n in the call:
+        // cblas_dgemm(ColMajor, NoTrans, NoTrans, n, m, k, 1.0, B, ldb, A, lda, 0.0, C, ldc)
         cblas_dgemm(
-            CBLAS_ROW_MAJOR,
-            CBLAS_NO_TRANS,
-            CBLAS_NO_TRANS,
-            m as c_int,
-            n as c_int,
-            k as c_int,
-            1.0f64,
-            a,
-            lda as c_int,
-            b,
-            ldb as c_int,
-            0.0f64,
-            c,
-            ldc as c_int,
+            CBLAS_COL_MAJOR, // Column-major storage order
+            CBLAS_NO_TRANS,  // B^T is not transposed (but we're passing B)
+            CBLAS_NO_TRANS,  // A^T is not transposed (but we're passing A)
+            n as c_int,      // Number of rows in B^T (cols in B) = n
+            m as c_int,      // Number of columns in A^T (rows in A) = m
+            k as c_int,      // Inner dimension k
+            1.0f64,          // alpha: coefficient for B*A
+            b,               // B: second input matrix (k x n) -> treated as B^T (n x k)
+            ldb as c_int,    // ldb: leading dimension of B (k for row-major B)
+            a,               // A: first input matrix (m x k) -> treated as A^T (k x m)
+            lda as c_int,    // lda: leading dimension of A (k for row-major A)
+            0.0f64,          // beta: coefficient for existing C (0 to overwrite)
+            c,               // C: output matrix (m x n) -> treated as C^T (n x m)
+            ldc as c_int,    // ldc: leading dimension of C (n for row-major C)
         );
     }
 
-    // Rewrite scalar add implementation, optimize with cblas_axpy
     #[inline(always)]
     fn v_add_scalar_f32(&self, x: &[f32], scalar: f32, out: &mut [f32]) {
         assert_eq!(
@@ -243,10 +242,11 @@ impl OpsTrait for OpenBlasBackend {
             out.len(),
             "Input and output slices must have same length"
         );
-        // Use cblas_saxpy for vector-scalar addition operation
-        // First copy x to out, then perform y = alpha * x + y
-        out.copy_from_slice(x);
-        unsafe { cblas_saxpy(x.len() as c_int, scalar, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
+        // For scalar addition: out = x + scalar
+        // We use cblas_saxpy: y = alpha * x + y
+        // Set out = scalar (broadcast), then out = 1.0 * x + out = x + scalar
+        out.fill(scalar);
+        unsafe { cblas_saxpy(x.len() as c_int, 1.0, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -256,9 +256,10 @@ impl OpsTrait for OpenBlasBackend {
             out.len(),
             "Input and output slices must have same length",
         );
-        // Use cblas_daxpy for vector-scalar addition operation
-        // First copy x to out, then perform y = alpha * x + y
-        out.copy_from_slice(x);
-        unsafe { cblas_daxpy(x.len() as c_int, scalar, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
+        // For scalar addition: out = x + scalar
+        // We use cblas_daxpy: y = alpha * x + y
+        // Set out = scalar (broadcast), then out = 1.0 * x + out = x + scalar
+        out.fill(scalar);
+        unsafe { cblas_daxpy(x.len() as c_int, 1.0, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
     }
 }

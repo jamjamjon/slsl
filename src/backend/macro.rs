@@ -141,24 +141,25 @@ macro_rules! impl_gemm_sd {
 
             // Use unified gemm library for optimized matrix multiplication
             // Formula: dst := alpha×dst + beta×lhs×rhs
-            // For C = A * B, we want: C = 0*C + 1*A*B
-            // Note: gemm expects (dst, rhs, lhs) parameter order
+            // For C = A * B, we want: C = 0*C + 1*A*B, so alpha=0, beta=1
+            // Note: gemm expects (dst, lhs, rhs) parameter order, so for C = A*B we pass (C, A, B)
+            // For row-major layout: row_stride = 1, col_stride = leading_dimension
             gemm::gemm(
                 m,
                 n,
                 k,
                 c,
-                ldc as isize,
-                1,
-                false, // C matrix (dst)
-                b,
-                ldb as isize,
-                1, // B matrix (rhs)
-                a,
-                lda as isize,
-                1, // A matrix (lhs)
-                0.0f32,
-                1.0f32, // alpha=0, beta=1 for C = A*B
+                1,            // dst_rs: row stride for C matrix (row-major: 1)
+                ldc as isize, // dst_cs: column stride for C matrix (use ldc)
+                false,        // read_dst: don't read existing values in C
+                a,            // lhs: A matrix (first operand)
+                1,            // lhs_rs: row stride for A matrix (row-major: 1)
+                lda as isize, // lhs_cs: column stride for A matrix (use lda)
+                b,            // rhs: B matrix (second operand)
+                1,            // rhs_rs: row stride for B matrix (row-major: 1)
+                ldb as isize, // rhs_cs: column stride for B matrix (use ldb)
+                0.0f32,       // alpha: coefficient for existing C (0 since we overwrite)
+                1.0f32,       // beta: coefficient for A*B
                 false,
                 false,
                 false, // conj_dst, conj_lhs, conj_rhs
@@ -203,24 +204,25 @@ macro_rules! impl_gemm_sd {
 
             // Use unified gemm library for optimized matrix multiplication
             // Formula: dst := alpha×dst + beta×lhs×rhs
-            // For C = A * B, we want: C = 0*C + 1*A*B
-            // Note: gemm expects (dst, rhs, lhs) parameter order
+            // For C = A * B, we want: C = 0*C + 1*A*B, so alpha=0, beta=1
+            // Note: gemm expects (dst, lhs, rhs) parameter order, so for C = A*B we pass (C, A, B)
+            // For row-major layout: row_stride = 1, col_stride = leading_dimension
             gemm::gemm(
                 m,
                 n,
                 k,
                 c,
-                ldc as isize,
-                1,
-                false, // C matrix (dst)
-                b,
-                ldb as isize,
-                1, // B matrix (rhs)
-                a,
-                lda as isize,
-                1, // A matrix (lhs)
-                0.0f64,
-                1.0f64, // alpha=0, beta=1 for C = A*B
+                1,            // dst_rs: row stride for C matrix (row-major: 1)
+                ldc as isize, // dst_cs: column stride for C matrix (use ldc)
+                false,        // read_dst: don't read existing values in C
+                a,            // lhs: A matrix (first operand)
+                1,            // lhs_rs: row stride for A matrix (row-major: 1)
+                lda as isize, // lhs_cs: column stride for A matrix (use lda)
+                b,            // rhs: B matrix (second operand)
+                1,            // rhs_rs: row stride for B matrix (row-major: 1)
+                ldb as isize, // rhs_cs: column stride for B matrix (use ldb)
+                0.0f64,       // alpha: coefficient for existing C (0 since we overwrite)
+                1.0f64,       // beta: coefficient for A*B
                 false,
                 false,
                 false, // conj_dst, conj_lhs, conj_rhs
@@ -325,24 +327,24 @@ macro_rules! impl_gemm_half {
 
             // Use unified gemm library for optimized f16 matrix multiplication
             // Formula: dst := alpha×dst + beta×lhs×rhs
-            // For C = A * B, we want: C = 0*C + 1*A*B
-            // Note: gemm expects (dst, rhs, lhs) parameter order
+            // For C = A * B, we want: C = 0*C + 1*A*B, so alpha=0, beta=1
+            // Note: gemm expects (dst, lhs, rhs) parameter order, so for C = A*B we pass (C, A, B)
             gemm::gemm(
                 m,
                 n,
                 k,
                 c,
-                ldc as isize,
-                1,
-                false, // C matrix (dst)
-                b,
-                ldb as isize,
-                1, // B matrix (rhs)
-                a,
-                lda as isize,
-                1, // A matrix (lhs)
-                gemm::f16::ZERO,
-                gemm::f16::ONE, // alpha=0, beta=1 for C = A*B
+                1,               // dst_rs: row stride for C matrix (row-major: 1)
+                ldc as isize,    // dst_cs: column stride for C matrix (use ldc)
+                false,           // read_dst: don't read existing values in C
+                a,               // lhs: A matrix (first operand)
+                1,               // lhs_rs: row stride for A matrix (row-major: 1)
+                lda as isize,    // lhs_cs: column stride for A matrix (use lda)
+                b,               // rhs: B matrix (second operand)
+                1,               // rhs_rs: row stride for B matrix (row-major: 1)
+                ldb as isize,    // rhs_cs: column stride for B matrix (use ldb)
+                gemm::f16::ZERO, // alpha: coefficient for existing C (0 since we overwrite)
+                gemm::f16::ONE,  // beta: coefficient for A*B
                 false,
                 false,
                 false, // conj_dst, conj_lhs, conj_rhs

@@ -1,6 +1,6 @@
 [package]
 name = "slsl"
-version = "0.0.1"
+version = "0.0.2"
 rust-version = "1.82"
 edition = "2021"
 readme = "README.md"
@@ -13,9 +13,9 @@ exclude = ["examples/*", "benches/*", "tests/*"]
 [features]
 default = []
 rayon = ["dep:rayon"]
-accelerate = ["accelerate-src"]
-mkl = ["intel-mkl-src"]
-openblas = ["openblas-src"]
+accelerate = ["dep:accelerate-src"]
+mkl = ["dep:intel-mkl-src"]
+openblas = ["dep:openblas-src"]
 
 [dependencies]
 anyhow = "1.0"

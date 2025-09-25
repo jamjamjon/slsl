@@ -60,16 +60,19 @@ impl<S: StorageTrait> TensorBase<S> {
                 let a_data = self.as_slice::<f32>()?;
                 let b_data = other.as_slice::<f32>()?;
                 let y = UninitVec::<f32>::new(m * n).init_with(|y| unsafe {
+                    // For C = A * B where A is (m, k) and B is (k, n)
+                    // gemm expects: gemm(m, n, k, a_ptr, lda, b_ptr, ldb, c_ptr, ldc)
+                    // lda = k (leading dimension of A), ldb = n (leading dimension of B), ldc = n (leading dimension of C)
                     backend.gemm_f32(
                         m,
                         n,
                         k,
                         a_data.as_ptr(),
-                        k,
+                        k, // lda: leading dimension of A (row-major: k)
                         b_data.as_ptr(),
-                        n,
+                        n, // ldb: leading dimension of B (row-major: n)
                         y.as_mut_ptr(),
-                        n,
+                        n, // ldc: leading dimension of C (row-major: n)
                     );
                 });
                 Tensor::from_vec(y, [m, n])
@@ -78,16 +81,19 @@ impl<S: StorageTrait> TensorBase<S> {
                 let a_data = self.as_slice::<f64>()?;
                 let b_data = other.as_slice::<f64>()?;
                 let y = UninitVec::<f64>::new(m * n).init_with(|y| unsafe {
+                    // For C = A * B where A is (m, k) and B is (k, n)
+                    // gemm expects: gemm(m, n, k, a_ptr, lda, b_ptr, ldb, c_ptr, ldc)
+                    // lda = k (leading dimension of A), ldb = n (leading dimension of B), ldc = n (leading dimension of C)
                     backend.gemm_f64(
                         m,
                         n,
                         k,
                         a_data.as_ptr(),
-                        k,
+                        k, // lda: leading dimension of A (row-major: k)
                         b_data.as_ptr(),
-                        n,
+                        n, // ldb: leading dimension of B (row-major: n)
                         y.as_mut_ptr(),
-                        n,
+                        n, // ldc: leading dimension of C (row-major: n)
                     );
                 });
                 Tensor::from_vec(y, [m, n])
@@ -96,6 +102,7 @@ impl<S: StorageTrait> TensorBase<S> {
                 let a_data = self.as_slice::<i8>()?;
                 let b_data = other.as_slice::<i8>()?;
                 let y = UninitVec::<i8>::new(m * n).init_with(|y| unsafe {
+                    // For row-major matrices: lda = k (stride between rows of A), ldb = n (stride between rows of B), ldc = n (stride between rows of C)
                     backend.gemm_i8(
                         m,
                         n,
@@ -114,6 +121,7 @@ impl<S: StorageTrait> TensorBase<S> {
                 let a_data = self.as_slice::<i16>()?;
                 let b_data = other.as_slice::<i16>()?;
                 let y = UninitVec::<i16>::new(m * n).init_with(|y| unsafe {
+                    // For row-major matrices: lda = k (stride between rows of A), ldb = n (stride between rows of B), ldc = n (stride between rows of C)
                     backend.gemm_i16(
                         m,
                         n,
@@ -132,6 +140,7 @@ impl<S: StorageTrait> TensorBase<S> {
                 let a_data = self.as_slice::<i32>()?;
                 let b_data = other.as_slice::<i32>()?;
                 let y = UninitVec::<i32>::new(m * n).init_with(|y| unsafe {
+                    // For row-major matrices: lda = k (stride between rows of A), ldb = n (stride between rows of B), ldc = n (stride between rows of C)
                     backend.gemm_i32(
                         m,
                         n,

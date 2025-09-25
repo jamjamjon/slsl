@@ -1,3 +1,4 @@
+#![allow(unused)]
 #[cfg(feature = "accelerate")]
 mod accelerate;
 #[cfg(not(any(feature = "accelerate", feature = "mkl", feature = "openblas")))]
@@ -17,6 +18,7 @@ pub use simd::*;
 #[cfg(any(feature = "accelerate", feature = "mkl", feature = "openblas"))]
 pub(crate) mod cblas_consts {
     pub(crate) const CBLAS_ROW_MAJOR: std::ffi::c_int = 101;
+    pub(crate) const CBLAS_COL_MAJOR: std::ffi::c_int = 102;
     pub(crate) const CBLAS_NO_TRANS: std::ffi::c_int = 111;
 }
 

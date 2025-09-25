@@ -91,10 +91,6 @@ extern "C" {
     fn vDSP_vneg(a: *const c_float, ia: c_int, c: *mut c_float, ic: c_int, n: c_int);
     fn vDSP_vnegD(a: *const c_double, ia: c_int, c: *mut c_double, ic: c_int, n: c_int);
 
-    // vDSP sum of absolute values (L1 norm)
-    fn vDSP_sasum(x: *const c_float, incx: c_int, result: *mut c_float, n: c_int);
-    fn vDSP_dasum(x: *const c_double, incx: c_int, result: *mut c_double, n: c_int);
-
     fn vDSP_vadd(
         a: *const c_float,
         ia: c_int,
@@ -284,14 +280,6 @@ extern "C" {
         n: c_int,
     );
 
-    // vDSP vector sum of squares (for L2 norm calculation)
-    fn vDSP_svesq(x: *const c_float, ix: c_int, result: *mut c_float, n: c_int);
-    fn vDSP_dvesq(x: *const c_double, ix: c_int, result: *mut c_double, n: c_int);
-
-    // vDSP vector sum operations
-    fn vDSP_sve(x: *const c_float, ix: c_int, result: *mut c_float, n: c_int);
-    fn vDSP_sveD(x: *const c_double, ix: c_int, result: *mut c_double, n: c_int);
-
     // vDSP vector mean operations
     fn vDSP_meanv(x: *const c_float, ix: c_int, result: *mut c_float, n: c_int);
     fn vDSP_meanvD(x: *const c_double, ix: c_int, result: *mut c_double, n: c_int);
@@ -354,10 +342,7 @@ impl OpsTrait for AccelerateBackend {
         if x.is_empty() {
             return 0.0f32;
         }
-        // Use vDSP_sasum for better performance on Apple hardware
-        let mut result = 0.0f32;
-        unsafe { vDSP_sasum(x.as_ptr(), 1, &mut result, x.len() as c_int) }
-        result
+        unsafe { cblas_sasum(x.len() as c_int, x.as_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -365,10 +350,7 @@ impl OpsTrait for AccelerateBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        // Use vDSP_dasum for better performance on Apple hardware
-        let mut result = 0.0f64;
-        unsafe { vDSP_dasum(x.as_ptr(), 1, &mut result, x.len() as c_int) }
-        result
+        unsafe { cblas_dasum(x.len() as c_int, x.as_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -386,10 +368,7 @@ impl OpsTrait for AccelerateBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        // Use vDSP_svesq for better performance on Apple hardware
-        let mut sum_squares = 0.0f32;
-        unsafe { vDSP_svesq(x.as_ptr(), 1, &mut sum_squares, x.len() as c_int) }
-        sum_squares.sqrt() as f64
+        unsafe { cblas_snrm2(x.len() as c_int, x.as_ptr(), 1) as f64 }
     }
 
     #[inline(always)]
@@ -397,21 +376,16 @@ impl OpsTrait for AccelerateBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        // Use vDSP_dvesq for better performance on Apple hardware
-        let mut sum_squares = 0.0f64;
-        unsafe { vDSP_dvesq(x.as_ptr(), 1, &mut sum_squares, x.len() as c_int) }
-        sum_squares.sqrt()
+        unsafe { cblas_dnrm2(x.len() as c_int, x.as_ptr(), 1) }
     }
 
-    // Sum operations using vDSP_sve and vDSP_sveD
     #[inline(always)]
     fn sum_f32(&self, x: &[f32]) -> f32 {
         if x.is_empty() {
             return 0.0f32;
         }
-        let mut result = 0.0f32;
-        unsafe { vDSP_sve(x.as_ptr(), 1, &mut result, x.len() as c_int) }
-        result
+        let ones = UninitVec::<f32>::new(x.len()).full(1.0f32);
+        self.dot_f32(x, &ones) as f32
     }
 
     #[inline(always)]
@@ -419,9 +393,8 @@ impl OpsTrait for AccelerateBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        let mut result = 0.0f64;
-        unsafe { vDSP_sveD(x.as_ptr(), 1, &mut result, x.len() as c_int) }
-        result
+        let ones = UninitVec::<f64>::new(x.len()).full(1.0f64);
+        self.dot_f64(x, &ones)
     }
 
     // Mean operations using vDSP_meanv and vDSP_meanvD

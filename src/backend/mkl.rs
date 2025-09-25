@@ -140,9 +140,6 @@ extern "C" {
     fn vsAbs(n: c_int, a: *const c_float, y: *mut c_float);
     fn vdAbs(n: c_int, a: *const c_double, y: *mut c_double);
 
-    fn vsNeg(n: c_int, a: *const c_float, y: *mut c_float);
-    fn vdNeg(n: c_int, a: *const c_double, y: *mut c_double);
-
     fn vsPow(n: c_int, a: *const c_float, b: *const c_float, y: *mut c_float);
     fn vdPow(n: c_int, a: *const c_double, b: *const c_double, y: *mut c_double);
 
@@ -151,10 +148,6 @@ extern "C" {
     fn vdFmax(n: c_int, a: *const c_double, b: *const c_double, y: *mut c_double);
     fn vsFmin(n: c_int, a: *const c_float, b: *const c_float, y: *mut c_float);
     fn vdFmin(n: c_int, a: *const c_double, b: *const c_double, y: *mut c_double);
-
-    // Vector L2 norm functions (more optimized than cblas_nrm2)
-    fn vdNorm(n: c_int, x: *const c_double, incx: c_int, norm: *mut c_double);
-    fn vsNorm(n: c_int, x: *const c_float, incx: c_int, norm: *mut c_float);
 
 }
 
@@ -651,7 +644,8 @@ impl OpsTrait for MklBackend {
             out.len(),
             "Input and output slices must have same length"
         );
-        unsafe { vsNeg(x.len() as c_int, x.as_ptr(), out.as_mut_ptr()) }
+        out.copy_from_slice(x);
+        unsafe { cblas_sscal(out.len() as c_int, -1.0, out.as_mut_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -661,7 +655,8 @@ impl OpsTrait for MklBackend {
             out.len(),
             "Input and output slices must have same length"
         );
-        unsafe { vdNeg(x.len() as c_int, x.as_ptr(), out.as_mut_ptr()) }
+        out.copy_from_slice(x);
+        unsafe { cblas_dscal(out.len() as c_int, -1.0, out.as_mut_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -789,8 +784,9 @@ impl OpsTrait for MklBackend {
             out.len(),
             "Input and output slices must have same length"
         );
-        out.copy_from_slice(x);
-        unsafe { cblas_saxpy(x.len() as c_int, scalar, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
+        out.fill(scalar);
+        // Add x to the scalar-filled output: out = scalar + x
+        unsafe { cblas_saxpy(x.len() as c_int, 1.0, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -800,8 +796,9 @@ impl OpsTrait for MklBackend {
             out.len(),
             "Input and output slices must have same length"
         );
-        out.copy_from_slice(x);
-        unsafe { cblas_daxpy(x.len() as c_int, scalar, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
+        out.fill(scalar);
+        // Add x to the scalar-filled output: out = scalar + x
+        unsafe { cblas_daxpy(x.len() as c_int, 1.0, x.as_ptr(), 1, out.as_mut_ptr(), 1) }
     }
 
     #[inline(always)]
@@ -809,10 +806,7 @@ impl OpsTrait for MklBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        // Use vsNorm for better performance on Intel hardware
-        let mut result = 0.0f32;
-        unsafe { vsNorm(x.len() as c_int, x.as_ptr(), 1, &mut result) }
-        result as f64
+        unsafe { cblas_snrm2(x.len() as c_int, x.as_ptr(), 1) as f64 }
     }
 
     #[inline(always)]
@@ -820,9 +814,6 @@ impl OpsTrait for MklBackend {
         if x.is_empty() {
             return 0.0f64;
         }
-        // Use vdNorm for better performance on Intel hardware
-        let mut result = 0.0f64;
-        unsafe { vdNorm(x.len() as c_int, x.as_ptr(), 1, &mut result) }
-        result
+        unsafe { cblas_dnrm2(x.len() as c_int, x.as_ptr(), 1) }
     }
 }
