@@ -1,4 +1,4 @@
-use crate::{Dim, Shape, StorageTrait, Tensor, TensorBase, TensorElement};
+use crate::{Dim, Shape, StorageTrait, Tensor, TensorBase, TensorElement, UninitVec};
 
 impl<S: StorageTrait> TensorBase<S> {
     /// Standardizes the tensor by subtracting the mean and dividing by the standard deviation along a specified dimension.
@@ -107,12 +107,258 @@ impl<S: StorageTrait> TensorBase<S> {
             dim_size
         );
 
-        let mut broadcast_shape = Shape::full(1, self.rank());
-        broadcast_shape[dim] = dim_size;
-        let mean = Tensor::from(mean).reshape(broadcast_shape)?;
-        let std = Tensor::from(std).reshape(broadcast_shape)?;
+        self.standardize_impl(mean, std, dim)
+    }
 
-        Ok((self - mean.broadcast_to(self.dims())?) / std.broadcast_to(self.dims())?)
+    fn standardize_impl<T: TensorElement + num_traits::Float>(
+        &self,
+        mean: &[T],
+        std: &[T],
+        dim: usize,
+    ) -> anyhow::Result<Tensor> {
+        let numel = self.numel();
+        let shape = *self.shape();
+
+        // Pre-compute reciprocals to avoid division in the hot loop
+        let inv_std: Vec<T> = std.iter().map(|&s| T::ONE / s).collect();
+
+        match T::DTYPE {
+            crate::DType::Fp32 => {
+                let mean_f32 = unsafe { std::mem::transmute::<&[T], &[f32]>(mean) };
+                let inv_std_f32 = unsafe { std::mem::transmute::<&[T], &[f32]>(&inv_std) };
+
+                let out = UninitVec::<f32>::new(numel).init_with(|dst| {
+                    if self.is_contiguous() {
+                        let input_slice = self.as_slice::<f32>().unwrap();
+                        self.standardize_contiguous_f32(
+                            input_slice,
+                            mean_f32,
+                            inv_std_f32,
+                            dim,
+                            dst,
+                        );
+                    } else {
+                        self.standardize_non_contiguous_f32(mean_f32, inv_std_f32, dim, dst);
+                    }
+                });
+                Tensor::from_vec(out, shape)
+            }
+            crate::DType::Fp64 => {
+                let mean_f64 = unsafe { std::mem::transmute::<&[T], &[f64]>(mean) };
+                let inv_std_f64 = unsafe { std::mem::transmute::<&[T], &[f64]>(&inv_std) };
+
+                let out = UninitVec::<f64>::new(numel).init_with(|dst| {
+                    if self.is_contiguous() {
+                        let input_slice = self.as_slice::<f64>().unwrap();
+                        self.standardize_contiguous_f64(
+                            input_slice,
+                            mean_f64,
+                            inv_std_f64,
+                            dim,
+                            dst,
+                        );
+                    } else {
+                        self.standardize_non_contiguous_f64(mean_f64, inv_std_f64, dim, dst);
+                    }
+                });
+                Tensor::from_vec(out, shape)
+            }
+            _ => {
+                // Fallback
+                let mut broadcast_shape = Shape::full(1, self.rank());
+                broadcast_shape[dim] = shape[dim];
+                let mean_tensor = Tensor::from(mean).reshape(broadcast_shape)?;
+                let std_tensor = Tensor::from(std).reshape(broadcast_shape)?;
+                Ok((self - mean_tensor.broadcast_to(self.dims())?)
+                    / std_tensor.broadcast_to(self.dims())?)
+            }
+        }
+    }
+
+    #[inline]
+    fn standardize_contiguous_f32(
+        &self,
+        input: &[f32],
+        mean: &[f32],
+        inv_std: &[f32],
+        dim: usize,
+        output: &mut [f32],
+    ) {
+        let shape = self.shape();
+        let dim_size = shape[dim];
+
+        // Calculate how many elements to process per channel
+        let elements_per_channel = self.numel() / dim_size;
+
+        // For common cases like CHW (dim=0) or HWC (dim=last), use optimized loops
+        if dim == 0 {
+            // CHW format: channels first
+            let channel_size = elements_per_channel;
+
+            for ch in 0..dim_size {
+                let m = mean[ch];
+                let s = inv_std[ch];
+                let start = ch * channel_size;
+                let end = start + channel_size;
+
+                for i in start..end {
+                    output[i] = (input[i] - m) * s;
+                }
+            }
+        } else if dim == shape.len() - 1 {
+            // HWC format: channels last
+            for chunk_idx in 0..elements_per_channel {
+                let start = chunk_idx * dim_size;
+                for ch in 0..dim_size {
+                    let idx = start + ch;
+                    output[idx] = (input[idx] - mean[ch]) * inv_std[ch];
+                }
+            }
+        } else {
+            // General case: use stride-based indexing
+            self.standardize_general_f32(input, mean, inv_std, dim, output);
+        }
+    }
+
+    #[inline]
+    fn standardize_contiguous_f64(
+        &self,
+        input: &[f64],
+        mean: &[f64],
+        inv_std: &[f64],
+        dim: usize,
+        output: &mut [f64],
+    ) {
+        let shape = self.shape();
+        let dim_size = shape[dim];
+        let elements_per_channel = self.numel() / dim_size;
+
+        if dim == 0 {
+            // CHW format: channels first
+            let channel_size = elements_per_channel;
+
+            for ch in 0..dim_size {
+                let m = mean[ch];
+                let s = inv_std[ch];
+                let start = ch * channel_size;
+                let end = start + channel_size;
+
+                for i in start..end {
+                    output[i] = (input[i] - m) * s;
+                }
+            }
+        } else if dim == shape.len() - 1 {
+            // HWC format: channels last
+            for chunk_idx in 0..elements_per_channel {
+                let start = chunk_idx * dim_size;
+                for ch in 0..dim_size {
+                    let idx = start + ch;
+                    output[idx] = (input[idx] - mean[ch]) * inv_std[ch];
+                }
+            }
+        } else {
+            // General case: use stride-based indexing
+            self.standardize_general_f64(input, mean, inv_std, dim, output);
+        }
+    }
+
+    /// General standardize implementation for f32 with arbitrary dimension
+    #[inline]
+    fn standardize_general_f32(
+        &self,
+        input: &[f32],
+        mean: &[f32],
+        inv_std: &[f32],
+        dim: usize,
+        output: &mut [f32],
+    ) {
+        let shape = self.shape();
+        let strides = self.strides();
+
+        for linear_idx in 0..self.numel() {
+            // Convert linear index to multi-dimensional indices
+            let mut remaining = linear_idx;
+            let mut indices_uninit = UninitVec::<usize>::new(shape.len());
+            let indices = indices_uninit.as_mut_slice();
+
+            for (i, &stride) in strides.iter().enumerate().rev() {
+                indices[i] = remaining / stride;
+                remaining %= stride;
+            }
+
+            let indices_uninit = unsafe { indices_uninit.finalize() };
+
+            let ch = indices_uninit[dim];
+            let val = input[linear_idx];
+            output[linear_idx] = (val - mean[ch]) * inv_std[ch];
+        }
+    }
+
+    #[inline]
+    fn standardize_general_f64(
+        &self,
+        input: &[f64],
+        mean: &[f64],
+        inv_std: &[f64],
+        dim: usize,
+        output: &mut [f64],
+    ) {
+        let shape = self.shape();
+        let strides = self.strides();
+
+        for linear_idx in 0..self.numel() {
+            let mut remaining = linear_idx;
+            let mut indices_uninit = UninitVec::<usize>::new(shape.len());
+            let indices = indices_uninit.as_mut_slice();
+
+            for (i, &stride) in strides.iter().enumerate().rev() {
+                indices[i] = remaining / stride;
+                remaining %= stride;
+            }
+            let indices_uninit = unsafe { indices_uninit.finalize() };
+
+            let ch = indices_uninit[dim];
+            let val = input[linear_idx];
+            output[linear_idx] = (val - mean[ch]) * inv_std[ch];
+        }
+    }
+
+    /// Non-contiguous standardize implementation for f32
+    #[inline]
+    fn standardize_non_contiguous_f32(
+        &self,
+        mean: &[f32],
+        inv_std: &[f32],
+        dim: usize,
+        output: &mut [f32],
+    ) {
+        for (out_val, elem) in output.iter_mut().zip(self.iter()) {
+            let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+            let val = unsafe { *(ptr as *const f32) };
+
+            // Calculate channel index from element indices
+            let ch = elem.indices[dim];
+            *out_val = (val - mean[ch]) * inv_std[ch];
+        }
+    }
+
+    /// Non-contiguous standardize implementation for f64
+    #[inline]
+    fn standardize_non_contiguous_f64(
+        &self,
+        mean: &[f64],
+        inv_std: &[f64],
+        dim: usize,
+        output: &mut [f64],
+    ) {
+        for (out_val, elem) in output.iter_mut().zip(self.iter()) {
+            let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
+            let val = unsafe { *(ptr as *const f64) };
+
+            // Calculate channel index from element indices
+            let ch = elem.indices[dim];
+            *out_val = (val - mean[ch]) * inv_std[ch];
+        }
     }
 }
 

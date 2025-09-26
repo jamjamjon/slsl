@@ -1,6 +1,6 @@
 [package]
 name = "slsl"
-version = "0.0.2"
+version = "0.0.3"
 rust-version = "1.82"
 edition = "2021"
 readme = "README.md"
@@ -78,6 +78,10 @@ name = "bench_creation"
 harness = false
 
 [[bench]]
+name = "bench_permute"
+harness = false
+
+[[bench]]
 name = "bench_contiguous"
 harness = false
 
@@ -99,4 +103,12 @@ harness = false
 
 [[bench]]
 name = "bench_binary"
+harness = false
+
+[[bench]]
+name = "bench_cat_stack"
+harness = false
+
+[[bench]]
+name = "bench_standardize"
 harness = false

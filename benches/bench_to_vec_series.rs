@@ -303,84 +303,6 @@ fn bench_to_vec3_non_contiguous(c: &mut Criterion) {
     group.finish();
 }
 
-// ========== to_flat_vec Benchmarks ==========
-
-fn bench_to_flat_vec_contiguous(c: &mut Criterion) {
-    let mut group = c.benchmark_group("to_flat_vec_contiguous");
-    let shape = [50, 200]; // 10000 elements total
-
-    // Create contiguous test data
-    let slsl_tensor = Tensor::zeros::<f32>(shape).unwrap();
-    let slsl_tensor_slice = slsl_tensor.slice(s![.., ..]);
-    let ndarray_tensor = Array2::<f32>::zeros((shape[0], shape[1]));
-    let device = Device::Cpu;
-    let candle_tensor =
-        CandleTensor::zeros(&[shape[0], shape[1]], CandleDType::F32, &device).unwrap();
-
-    group.bench_function("slsl_checked", |b| {
-        b.iter(|| {
-            let result = slsl_tensor.to_flat_vec::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_slice_checked", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_slice.to_flat_vec::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_flatten", |b| {
-        b.iter(|| {
-            let result = candle_tensor
-                .flatten_all()
-                .unwrap()
-                .to_vec1::<f32>()
-                .unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("ndarray_flatten", |b| {
-        b.iter(|| {
-            let result = ndarray_tensor.iter().cloned().collect::<Vec<f32>>();
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
-
-fn bench_to_flat_vec_non_contiguous(c: &mut Criterion) {
-    let mut group = c.benchmark_group("to_flat_vec_non_contiguous");
-    let shape = [200, 50]; // 10000 elements total
-
-    // Create non-contiguous test data by slicing from larger tensor
-    let slsl_base = Tensor::zeros::<f32>([shape[0] * 2, shape[1]]).unwrap();
-    let slsl_tensor = slsl_base.slice(s![0..shape[0], ..]); // Non-contiguous with stride
-    let _slsl_tensor_slice = slsl_tensor.slice(s![.., ..]);
-
-    let ndarray_base = Array2::<f32>::zeros((shape[1], shape[0]));
-    let ndarray_tensor = ndarray_base.t(); // Transposed view
-
-    group.bench_function("slsl_checked", |b| {
-        b.iter(|| {
-            let result = slsl_tensor.to_flat_vec::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("ndarray_flatten", |b| {
-        b.iter(|| {
-            let result = ndarray_tensor.iter().cloned().collect::<Vec<f32>>();
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
-
 criterion_group!(
     benches,
     bench_to_scalar,
@@ -390,8 +312,6 @@ criterion_group!(
     bench_to_vec2_non_contiguous,
     bench_to_vec3_contiguous,
     bench_to_vec3_non_contiguous,
-    bench_to_flat_vec_contiguous,
-    bench_to_flat_vec_non_contiguous,
 );
 
 criterion_main!(benches);

@@ -7,8 +7,6 @@ impl<S: StorageTrait> TensorBase<S> {
     pub fn permute<D: Dims>(self, dims: D) -> Result<TensorBase<S>> {
         let rank = self.rank();
         let perm_dims = dims.to_dims(rank)?;
-
-        // Validate permutation dimensions
         if perm_dims.len() != rank {
             anyhow::bail!(
                 "Permutation dimensions length {} must match tensor rank {}",
@@ -17,9 +15,8 @@ impl<S: StorageTrait> TensorBase<S> {
             );
         }
 
-        // Check that all dimensions are unique and valid
-        // Use UninitVec for better performance - avoid initializing to false
-        let mut used = UninitVec::<bool>::new(rank).full(false);
+        // Use bit manipulation for fast validation (up to 16 dimensions)
+        let mut used_bits = 0u16;
         for &dim in perm_dims.as_slice() {
             if dim >= rank {
                 anyhow::bail!(
@@ -28,16 +25,16 @@ impl<S: StorageTrait> TensorBase<S> {
                     rank
                 );
             }
-            if used[dim] {
+            let bit = 1u16 << dim;
+            if used_bits & bit != 0 {
                 anyhow::bail!("Dimension {} appears multiple times in permutation", dim);
             }
-            used[dim] = true;
+            used_bits |= bit;
         }
 
-        // Create new shape and strides based on permutation
         let mut new_shape = Shape::empty().with_len(rank);
         let mut new_strides = Shape::empty().with_len(rank);
-        for (i, &dim) in perm_dims.as_slice().iter().enumerate() {
+        for (i, &dim) in perm_dims.iter().enumerate() {
             new_shape[i] = self.shape[dim];
             new_strides[i] = self.strides[dim];
         }
@@ -68,16 +65,46 @@ impl<S: StorageTrait> TensorBase<S> {
             });
         }
 
-        // Create reversed dimension indices: [n-1, n-2, ..., 1, 0]
-        // Use UninitVec for better performance - avoid repeated push operations
-        let flipped_dims = UninitVec::<usize>::new(rank).init_with(|dims| {
-            for (i, dim) in dims.iter_mut().enumerate() {
-                *dim = rank - 1 - i;
+        match rank {
+            1 => Ok(self),
+            2 => Ok(TensorBase {
+                storage: self.storage,
+                ptr: self.ptr,
+                dtype: self.dtype,
+                shape: Shape::from([self.shape[1], self.shape[0]]),
+                strides: Shape::from([self.strides[1], self.strides[0]]),
+                offset_bytes: self.offset_bytes,
+            }),
+            3 => Ok(TensorBase {
+                storage: self.storage,
+                ptr: self.ptr,
+                dtype: self.dtype,
+                shape: Shape::from([self.shape[2], self.shape[1], self.shape[0]]),
+                strides: Shape::from([self.strides[2], self.strides[1], self.strides[0]]),
+                offset_bytes: self.offset_bytes,
+            }),
+            4 => Ok(TensorBase {
+                storage: self.storage,
+                ptr: self.ptr,
+                dtype: self.dtype,
+                shape: Shape::from([self.shape[3], self.shape[2], self.shape[1], self.shape[0]]),
+                strides: Shape::from([
+                    self.strides[3],
+                    self.strides[2],
+                    self.strides[1],
+                    self.strides[0],
+                ]),
+                offset_bytes: self.offset_bytes,
+            }),
+            _ => {
+                let flipped_dims = UninitVec::<usize>::new(rank).init_with(|dims| {
+                    for (i, dim) in dims.iter_mut().enumerate() {
+                        *dim = rank - 1 - i;
+                    }
+                });
+                self.permute(flipped_dims)
             }
-        });
-
-        // Use existing permute logic for efficiency
-        self.permute(flipped_dims)
+        }
     }
 }
 
