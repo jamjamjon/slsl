@@ -148,32 +148,26 @@ impl<S: StorageTrait> TensorBase<S> {
         );
 
         let [dim0, dim1, dim2] = [self.shape()[0], self.shape()[1], self.shape()[2]];
-        let result = UninitVec::new(dim0).init_with(|result_slice| {
-            let mut iter = self.iter();
-            for (i, result_elem) in result_slice.iter_mut().enumerate().take(dim0) {
-                let plane = UninitVec::new(dim1).init_with(|plane_slice| {
-                    for (j, plane_elem) in plane_slice.iter_mut().enumerate().take(dim1) {
-                        let row = UninitVec::new(dim2).init_with(|row_slice| {
-                            for (k, row_elem) in row_slice.iter_mut().enumerate().take(dim2) {
-                                if let Some(elem) = iter.next() {
-                                    unsafe {
-                                        let ptr = elem.as_ptr(self.as_ptr()) as *const T;
-                                        *row_elem = *ptr;
-                                    }
-                                } else {
-                                    panic!(
-                                        "Iterator exhausted unexpectedly at [{}, {}, {}]",
-                                        i, j, k
-                                    );
-                                }
-                            }
-                        });
-                        *plane_elem = row;
+        let mut result: Vec<Vec<Vec<T>>> = Vec::with_capacity(dim0);
+        let mut iter = self.iter();
+        for i in 0..dim0 {
+            let mut plane: Vec<Vec<T>> = Vec::with_capacity(dim1);
+            for j in 0..dim1 {
+                let mut row: Vec<T> = Vec::with_capacity(dim2);
+                for k in 0..dim2 {
+                    if let Some(elem) = iter.next() {
+                        unsafe {
+                            let ptr = elem.as_ptr(self.as_ptr()) as *const T;
+                            row.push(*ptr);
+                        }
+                    } else {
+                        panic!("Iterator exhausted unexpectedly at [{}, {}, {}]", i, j, k);
                     }
-                });
-                *result_elem = plane;
+                }
+                plane.push(row);
             }
-        });
+            result.push(plane);
+        }
 
         Ok(result)
     }
