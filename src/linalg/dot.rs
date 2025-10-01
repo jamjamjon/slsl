@@ -131,111 +131,99 @@ impl<S: StorageTrait> TensorBase<S> {
 
         match self.dtype {
             DType::Fp32 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const f32) };
-                    let b_val = unsafe { *(other_ptr as *const f32) };
-                    sum += (a_val * b_val) as f64;
+                for (a, b) in self
+                    .iter_with_meta::<f32>()
+                    .zip(other.iter_with_meta::<f32>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Fp64 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const f64) };
-                    let b_val = unsafe { *(other_ptr as *const f64) };
-                    sum += a_val * b_val;
+                for (a, b) in self
+                    .iter_with_meta::<f64>()
+                    .zip(other.iter_with_meta::<f64>())
+                {
+                    sum += *a.value * *b.value;
                 }
             }
             DType::Int8 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const i8) };
-                    let b_val = unsafe { *(other_ptr as *const i8) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<i8>()
+                    .zip(other.iter_with_meta::<i8>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Int16 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const i16) };
-                    let b_val = unsafe { *(other_ptr as *const i16) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<i16>()
+                    .zip(other.iter_with_meta::<i16>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Int32 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const i32) };
-                    let b_val = unsafe { *(other_ptr as *const i32) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<i32>()
+                    .zip(other.iter_with_meta::<i32>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Int64 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const i64) };
-                    let b_val = unsafe { *(other_ptr as *const i64) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<i64>()
+                    .zip(other.iter_with_meta::<i64>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Uint8 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *self_ptr };
-                    let b_val = unsafe { *other_ptr };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<u8>()
+                    .zip(other.iter_with_meta::<u8>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Uint16 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const u16) };
-                    let b_val = unsafe { *(other_ptr as *const u16) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<u16>()
+                    .zip(other.iter_with_meta::<u16>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Uint32 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const u32) };
-                    let b_val = unsafe { *(other_ptr as *const u32) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<u32>()
+                    .zip(other.iter_with_meta::<u32>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Uint64 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const u64) };
-                    let b_val = unsafe { *(other_ptr as *const u64) };
-                    sum += (a_val as f64) * (b_val as f64);
+                for (a, b) in self
+                    .iter_with_meta::<u64>()
+                    .zip(other.iter_with_meta::<u64>())
+                {
+                    sum += (*a.value as f64) * (*b.value as f64);
                 }
             }
             DType::Fp16 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const half::f16) };
-                    let b_val = unsafe { *(other_ptr as *const half::f16) };
-                    sum += (a_val.to_f32() * b_val.to_f32()) as f64;
+                for (a, b) in self
+                    .iter_with_meta::<half::f16>()
+                    .zip(other.iter_with_meta::<half::f16>())
+                {
+                    sum += (a.value.to_f32() * b.value.to_f32()) as f64;
                 }
             }
             DType::Bf16 => {
-                for (self_elem, other_elem) in self.iter().zip(other.iter()) {
-                    let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                    let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                    let a_val = unsafe { *(self_ptr as *const half::bf16) };
-                    let b_val = unsafe { *(other_ptr as *const half::bf16) };
-                    sum += (a_val.to_f32() * b_val.to_f32()) as f64;
+                for (a, b) in self
+                    .iter_with_meta::<half::bf16>()
+                    .zip(other.iter_with_meta::<half::bf16>())
+                {
+                    sum += (a.value.to_f32() * b.value.to_f32()) as f64;
                 }
             }
             DType::Bool => {

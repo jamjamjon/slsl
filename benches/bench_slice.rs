@@ -6,9 +6,22 @@ use slsl::{s, Tensor};
 use std::hint::black_box;
 
 // Test data configuration
-const SIZES_1D: [usize; 4] = [10, 100, 1000, 10000];
-const SIZES_2D: [(usize, usize); 4] = [(10, 10), (50, 50), (100, 100), (500, 500)];
-const SIZES_3D: [(usize, usize, usize); 3] = [(10, 10, 10), (20, 20, 20), (50, 50, 50)];
+const SIZES_1D: [usize; 6] = [10, 100, 1000, 4000, 8000, 10000];
+const SIZES_2D: [(usize, usize); 6] = [
+    (10, 10),
+    (100, 100),
+    (500, 500),
+    (1000, 1000),
+    (4000, 4000),
+    (8000, 8000),
+];
+const SIZES_3D: [(usize, usize, usize); 5] = [
+    (10, 10, 10),
+    (50, 50, 50),
+    (100, 100, 100),
+    (20, 4000, 4000),
+    (6, 8000, 8000),
+];
 
 fn generate_test_data_1d(size: usize) -> Vec<f32> {
     let mut rng = SmallRng::seed_from_u64(42);
@@ -24,24 +37,6 @@ fn generate_test_data_3d(d1: usize, d2: usize, d3: usize) -> Vec<f32> {
     let mut rng = SmallRng::seed_from_u64(42);
     (0..d1 * d2 * d3).map(|_| rng.random()).collect()
 }
-
-// Generate test data
-// fn generate_test_data() -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-//     let mut rng = SmallRng::seed_from_u64(42);
-
-//     let data_1d: Vec<f32> = (0..SMALL_1D).map(|_| rng.random()).collect();
-//     let data_2d_small: Vec<f32> = (0..SMALL_2D[0] * SMALL_2D[1])
-//         .map(|_| rng.random())
-//         .collect();
-//     let data_2d_medium: Vec<f32> = (0..MEDIUM_2D[0] * MEDIUM_2D[1])
-//         .map(|_| rng.random())
-//         .collect();
-//     let data_2d_large: Vec<f32> = (0..LARGE_2D[0] * LARGE_2D[1])
-//         .map(|_| rng.random())
-//         .collect();
-
-//     (data_1d, data_2d_small, data_2d_medium, data_2d_large)
-// }
 
 // 1D single index slice performance test
 fn bench_slice_1d_single_index(c: &mut Criterion) {

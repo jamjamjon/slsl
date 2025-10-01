@@ -1,9 +1,224 @@
 use anyhow::Result;
 use half::{bf16, f16};
 
-use crate::{global_backend, DType, Dim, OpsTrait, StorageTrait, Tensor, TensorBase, UninitVec};
+use crate::{
+    global_backend, DType, Dim, OpsTrait, StorageTrait, Tensor, TensorBase, TensorElement,
+    UninitVec,
+};
 
 impl<S: StorageTrait> TensorBase<S> {
+    pub fn min_max_all<T: TensorElement + std::cmp::PartialOrd>(&self) -> Result<(T, T)> {
+        if self.numel() == 0 {
+            anyhow::bail!("Cannot find min/max of empty tensor");
+        }
+
+        if self.is_contiguous() {
+            let backend = global_backend();
+
+            match self.dtype() {
+                DType::Fp32 => {
+                    let data = self.as_slice::<f32>()?;
+                    let (min_val, max_val) = backend.min_max_v_f32(data);
+                    Ok((T::from_f32(min_val), T::from_f32(max_val)))
+                }
+                DType::Fp64 => {
+                    let data = self.as_slice::<f64>()?;
+                    let (min_val, max_val) = backend.min_max_v_f64(data);
+                    Ok((T::from_f64(min_val), T::from_f64(max_val)))
+                }
+                DType::Bf16 => {
+                    let data = self.as_slice::<bf16>()?;
+                    let (min_val, max_val) = backend.min_max_v_bf16(data);
+                    Ok((T::from_bf16(min_val), T::from_bf16(max_val)))
+                }
+                DType::Fp16 => {
+                    let data = self.as_slice::<f16>()?;
+                    let (min_val, max_val) = backend.min_max_v_f16(data);
+                    Ok((T::from_f16(min_val), T::from_f16(max_val)))
+                }
+                DType::Int8 => {
+                    let data = self.as_slice::<i8>()?;
+                    let (min_val, max_val) = backend.min_max_v_i8(data);
+                    Ok((T::from_i8(min_val), T::from_i8(max_val)))
+                }
+                DType::Int16 => {
+                    let data = self.as_slice::<i16>()?;
+                    let (min_val, max_val) = backend.min_max_v_i16(data);
+                    Ok((T::from_i16(min_val), T::from_i16(max_val)))
+                }
+                DType::Int32 => {
+                    let data = self.as_slice::<i32>()?;
+                    let (min_val, max_val) = backend.min_max_v_i32(data);
+                    Ok((T::from_i32(min_val), T::from_i32(max_val)))
+                }
+                DType::Int64 => {
+                    let data = self.as_slice::<i64>()?;
+                    let (min_val, max_val) = backend.min_max_v_i64(data);
+                    Ok((T::from_i64(min_val), T::from_i64(max_val)))
+                }
+                DType::Uint8 => {
+                    let data = self.as_slice::<u8>()?;
+                    let (min_val, max_val) = backend.min_max_v_u8(data);
+                    Ok((T::from_u8(min_val), T::from_u8(max_val)))
+                }
+                DType::Uint16 => {
+                    let data = self.as_slice::<u16>()?;
+                    let (min_val, max_val) = backend.min_max_v_u16(data);
+                    Ok((T::from_u16(min_val), T::from_u16(max_val)))
+                }
+                DType::Uint32 => {
+                    let data = self.as_slice::<u32>()?;
+                    let (min_val, max_val) = backend.min_max_v_u32(data);
+                    Ok((T::from_u32(min_val), T::from_u32(max_val)))
+                }
+                DType::Uint64 => {
+                    let data = self.as_slice::<u64>()?;
+                    let (min_val, max_val) = backend.min_max_v_u64(data);
+                    Ok((T::from_u64(min_val), T::from_u64(max_val)))
+                }
+                _ => anyhow::bail!("Min/Max not supported for dtype {:?}", self.dtype()),
+            }
+        } else {
+            let (min_val, max_val) = match self.dtype() {
+                DType::Fp32 => {
+                    let min_val = self
+                        .iter_with_meta::<f32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<f32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Fp64 => {
+                    let min_val = self
+                        .iter_with_meta::<f64>()
+                        .map(|it| *it.value)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<f64>()
+                        .map(|it| *it.value)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Fp16 => {
+                    let min_val = self
+                        .iter_with_meta::<f16>()
+                        .map(|it| f64::from(*it.value))
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<f16>()
+                        .map(|it| f64::from(*it.value))
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Bf16 => {
+                    let min_val = self
+                        .iter_with_meta::<bf16>()
+                        .map(|it| f64::from(*it.value))
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<bf16>()
+                        .map(|it| f64::from(*it.value))
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Int8 => {
+                    let min_val = self
+                        .iter_with_meta::<i8>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<i8>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Int16 => {
+                    let min_val = self
+                        .iter_with_meta::<i16>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<i16>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Int32 => {
+                    let min_val = self
+                        .iter_with_meta::<i32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<i32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Int64 => {
+                    let min_val = self
+                        .iter_with_meta::<i64>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<i64>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Uint8 => {
+                    let min_val = self
+                        .iter_with_meta::<u8>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<u8>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Uint16 => {
+                    let min_val = self
+                        .iter_with_meta::<u16>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<u16>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Uint32 => {
+                    let min_val = self
+                        .iter_with_meta::<u32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<u32>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                DType::Uint64 => {
+                    let min_val = self
+                        .iter_with_meta::<u64>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::INFINITY, f64::min);
+                    let max_val = self
+                        .iter_with_meta::<u64>()
+                        .map(|it| *it.value as f64)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    (min_val, max_val)
+                }
+                _ => unreachable!(),
+            };
+
+            Ok((T::from_f64(min_val), T::from_f64(max_val)))
+        }
+    }
+
     pub fn min_max<D: Dim + Clone>(&self, dim: D) -> Result<(Tensor, Tensor)> {
         self.min_max_impl(dim, false)
     }
@@ -378,10 +593,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f32) };
+                for item in self.iter_with_meta::<f32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -422,10 +636,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f64) };
+                for item in self.iter_with_meta::<f64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -466,10 +679,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f16) };
+                for item in self.iter_with_meta::<f16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -510,10 +722,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const bf16) };
+                for item in self.iter_with_meta::<bf16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -554,10 +765,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i8) };
+                for item in self.iter_with_meta::<i8>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -598,10 +808,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i16) };
+                for item in self.iter_with_meta::<i16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -642,10 +851,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i32) };
+                for item in self.iter_with_meta::<i32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -686,10 +894,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i64) };
+                for item in self.iter_with_meta::<i64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -730,10 +937,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr };
+                for item in self.iter_with_meta::<u8>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -774,10 +980,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u16) };
+                for item in self.iter_with_meta::<u16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -818,10 +1023,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u32) };
+                for item in self.iter_with_meta::<u32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -862,10 +1066,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 }
                 let mut idx_buf = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u64) };
+                for item in self.iter_with_meta::<u64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -1354,6 +1557,143 @@ mod tests {
         // Should fail for dimension >= rank
         assert!(tensor.min_max(1).is_err());
         assert!(tensor.min_max(2).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all() -> Result<()> {
+        // Test min_max_all function
+        let tensor = Tensor::from_vec(vec![3.0f32, 1.0, 4.0, 1.0, 5.0, 9.0], [2, 3])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, 1.0);
+        assert_eq!(max_val, 9.0);
+
+        // Test with negative values
+        let tensor = Tensor::from_vec(vec![-3.0f32, -1.0, -4.0, -1.0, -5.0], [5])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, -5.0);
+        assert_eq!(max_val, -1.0);
+
+        // Test with mixed positive and negative
+        let tensor = Tensor::from_vec(vec![-2.0f32, 3.0, -1.0, 4.0], [4])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, -2.0);
+        assert_eq!(max_val, 4.0);
+
+        // Test with single element
+        let tensor = Tensor::from_vec(vec![42.0f32], [1])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, 42.0);
+        assert_eq!(max_val, 42.0);
+
+        // Test with all same values
+        let tensor = Tensor::from_vec(vec![5.0f32; 10], [10])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, 5.0);
+        assert_eq!(max_val, 5.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_different_dtypes() -> Result<()> {
+        // Test with i32
+        let tensor_i32 = Tensor::from_vec(vec![3i32, 1, 4, 1, 5], [5])?;
+        let (min_val, max_val): (i32, i32) = tensor_i32.min_max_all()?;
+        assert_eq!(min_val, 1);
+        assert_eq!(max_val, 5);
+
+        // Test with f64
+        let tensor_f64 = Tensor::from_vec(vec![3.0f64, 1.0, 4.0, 1.0, 5.0], [5])?;
+        let (min_val, max_val): (f64, f64) = tensor_f64.min_max_all()?;
+        assert_eq!(min_val, 1.0);
+        assert_eq!(max_val, 5.0);
+
+        // Test with u32
+        let tensor_u32 = Tensor::from_vec(vec![3u32, 1, 4, 1, 5], [5])?;
+        let (min_val, max_val): (u32, u32) = tensor_u32.min_max_all()?;
+        assert_eq!(min_val, 1);
+        assert_eq!(max_val, 5);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_special_values() -> Result<()> {
+        // Test with infinity
+        let tensor = Tensor::from_vec(vec![f32::NEG_INFINITY, 1.0, f32::INFINITY, 2.0], [4])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, f32::NEG_INFINITY);
+        assert_eq!(max_val, f32::INFINITY);
+
+        // Test with NaN (NaN behavior in min/max operations)
+        let tensor = Tensor::from_vec(vec![1.0f32, f32::NAN, 2.0, 3.0], [4])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        // NaN comparisons are tricky, but typically NaN should propagate or be handled specially
+        println!("min_val: {min_val}, max_val: {max_val}");
+        // Just verify the operation completes without error
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_empty_tensor_error() -> Result<()> {
+        // Test that empty tensor throws an error
+        let tensor = Tensor::from_vec(Vec::<f32>::new(), [0])?;
+        let result: Result<(f32, f32), anyhow::Error> = tensor.min_max_all();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Cannot find min/max of empty tensor"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_large_tensor() -> Result<()> {
+        // Test with larger tensor to ensure performance
+        let size = 1000;
+        let mut data = vec![0.0f32; size];
+        for (i, item) in data.iter_mut().enumerate() {
+            *item = (i as f32) * 0.1;
+        }
+        data[0] = -1.0; // Minimum value
+        data[500] = 1000.0; // Maximum value
+
+        let tensor = Tensor::from_vec(data, [size])?;
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        assert_eq!(min_val, -1.0);
+        assert_eq!(max_val, 1000.0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_consistency_with_individual_ops() -> Result<()> {
+        // Test that min_max_all results are consistent with individual min_all and max_all operations
+        let tensor = Tensor::from_vec(vec![3.0f32, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0], [2, 4])?;
+
+        let (min_val, max_val): (f32, f32) = tensor.min_max_all()?;
+        let individual_min: f32 = tensor.min_all()?;
+        let individual_max: f32 = tensor.max_all()?;
+
+        assert_eq!(min_val, individual_min);
+        assert_eq!(max_val, individual_max);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_min_max_all_non_contiguous() -> Result<()> {
+        // Test min_max_all with non-contiguous tensor
+        let tensor = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])?;
+        let permuted = tensor.clone().permute([1, 0])?; // Shape becomes [3, 2]
+
+        let (min_val, max_val): (f32, f32) = permuted.min_max_all()?;
+        assert_eq!(min_val, 1.0);
+        assert_eq!(max_val, 6.0);
 
         Ok(())
     }

@@ -332,13 +332,9 @@ impl<S: StorageTrait> TensorBase<S> {
         dim: usize,
         output: &mut [f32],
     ) {
-        for (out_val, elem) in output.iter_mut().zip(self.iter()) {
-            let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-            let val = unsafe { *(ptr as *const f32) };
-
-            // Calculate channel index from element indices
-            let ch = elem.indices[dim];
-            *out_val = (val - mean[ch]) * inv_std[ch];
+        for (out_val, item) in output.iter_mut().zip(self.iter_with_meta::<f32>()) {
+            let ch = item.indices[dim];
+            *out_val = (*item.value - mean[ch]) * inv_std[ch];
         }
     }
 
@@ -351,13 +347,9 @@ impl<S: StorageTrait> TensorBase<S> {
         dim: usize,
         output: &mut [f64],
     ) {
-        for (out_val, elem) in output.iter_mut().zip(self.iter()) {
-            let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-            let val = unsafe { *(ptr as *const f64) };
-
-            // Calculate channel index from element indices
-            let ch = elem.indices[dim];
-            *out_val = (val - mean[ch]) * inv_std[ch];
+        for (out_val, item) in output.iter_mut().zip(self.iter_with_meta::<f64>()) {
+            let ch = item.indices[dim];
+            *out_val = (*item.value - mean[ch]) * inv_std[ch];
         }
     }
 }

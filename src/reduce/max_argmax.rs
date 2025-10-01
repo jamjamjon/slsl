@@ -334,10 +334,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![f32::NEG_INFINITY; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<f32>() };
+                    for item in self.iter_with_meta::<f32>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         // build output coordinates (skip or set reduced dim to 0)
                         let mut out_coords = Vec::with_capacity(new_shape.len());
@@ -374,10 +373,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![f64::NEG_INFINITY; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<f64>() };
+                    for item in self.iter_with_meta::<f64>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -412,10 +410,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![f16::from_f32(f32::NEG_INFINITY); result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<f16>() };
+                    for item in self.iter_with_meta::<f16>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -450,10 +447,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![bf16::from_f32(f32::NEG_INFINITY); result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<bf16>() };
+                    for item in self.iter_with_meta::<bf16>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -488,10 +484,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![i8::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<i8>() };
+                    for item in self.iter_with_meta::<i8>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -526,10 +521,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![i16::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<i16>() };
+                    for item in self.iter_with_meta::<i16>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -564,10 +558,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![i32::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<i32>() };
+                    for item in self.iter_with_meta::<i32>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -602,10 +595,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![i64::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<i64>() };
+                    for item in self.iter_with_meta::<i64>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -640,10 +632,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![u8::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<u8>() };
+                    for item in self.iter_with_meta::<u8>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -678,10 +669,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![u16::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<u16>() };
+                    for item in self.iter_with_meta::<u16>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -716,10 +706,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![u32::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<u32>() };
+                    for item in self.iter_with_meta::<u32>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -754,10 +743,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut maxs = vec![u64::MIN; result_size];
                     let mut argmaxs = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<u64>() };
+                    for item in self.iter_with_meta::<u64>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {

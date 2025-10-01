@@ -62,11 +62,8 @@ impl<S: StorageTrait> TensorBase<S> {
             })
         } else {
             UninitVec::new(numel).init_with(|slice| {
-                for (i, elem) in self.iter().enumerate() {
-                    unsafe {
-                        let ptr = elem.as_ptr(self.as_ptr()) as *const T;
-                        slice[i] = *ptr;
-                    }
+                for (i, item) in self.iter_with_meta::<T>().enumerate() {
+                    slice[i] = *item.value;
                 }
             })
         };
@@ -110,15 +107,12 @@ impl<S: StorageTrait> TensorBase<S> {
 
         let [rows, cols] = [self.shape()[0], self.shape()[1]];
         let mut result = Vec::with_capacity(rows);
-        let mut iter = self.iter();
+        let mut iter = self.iter_with_meta::<T>();
         for i in 0..rows {
             let row = UninitVec::new(cols).init_with(|row_slice| {
                 for (j, row_elem) in row_slice.iter_mut().enumerate().take(cols) {
-                    if let Some(elem) = iter.next() {
-                        unsafe {
-                            let ptr = elem.as_ptr(self.as_ptr()) as *const T;
-                            *row_elem = *ptr;
-                        }
+                    if let Some(item) = iter.next() {
+                        *row_elem = *item.value;
                     } else {
                         panic!("Iterator exhausted unexpectedly at row {}, col {}", i, j);
                     }
@@ -149,17 +143,14 @@ impl<S: StorageTrait> TensorBase<S> {
 
         let [dim0, dim1, dim2] = [self.shape()[0], self.shape()[1], self.shape()[2]];
         let mut result: Vec<Vec<Vec<T>>> = Vec::with_capacity(dim0);
-        let mut iter = self.iter();
+        let mut iter = self.iter_with_meta::<T>();
         for i in 0..dim0 {
             let mut plane: Vec<Vec<T>> = Vec::with_capacity(dim1);
             for j in 0..dim1 {
                 let mut row: Vec<T> = Vec::with_capacity(dim2);
                 for k in 0..dim2 {
-                    if let Some(elem) = iter.next() {
-                        unsafe {
-                            let ptr = elem.as_ptr(self.as_ptr()) as *const T;
-                            row.push(*ptr);
-                        }
+                    if let Some(item) = iter.next() {
+                        row.push(*item.value);
                     } else {
                         panic!("Iterator exhausted unexpectedly at [{}, {}, {}]", i, j, k);
                     }

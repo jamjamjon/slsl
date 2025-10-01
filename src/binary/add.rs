@@ -161,13 +161,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Fp32 => {
                 let numel = self.numel();
                 let out = UninitVec::<f32>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<f32>()
+                        .zip(other.iter_with_meta::<f32>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const f32) };
-                        let other_val = unsafe { *(other_ptr as *const f32) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -175,13 +174,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Fp64 => {
                 let numel = self.numel();
                 let out = UninitVec::<f64>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<f64>()
+                        .zip(other.iter_with_meta::<f64>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const f64) };
-                        let other_val = unsafe { *(other_ptr as *const f64) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -189,13 +187,13 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Fp16 => {
                 let numel = self.numel();
                 let out = UninitVec::<f16>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<f16>()
+                        .zip(other.iter_with_meta::<f16>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const f16) };
-                        let other_val = unsafe { *(other_ptr as *const f16) };
-                        dst[idx] = f16::from_f32(self_val.to_f32() + other_val.to_f32());
+                        dst[idx] =
+                            f16::from_f32(self_item.value.to_f32() + other_item.value.to_f32());
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -203,13 +201,13 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Bf16 => {
                 let numel = self.numel();
                 let out = UninitVec::<bf16>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<bf16>()
+                        .zip(other.iter_with_meta::<bf16>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const bf16) };
-                        let other_val = unsafe { *(other_ptr as *const bf16) };
-                        dst[idx] = bf16::from_f32(self_val.to_f32() + other_val.to_f32());
+                        dst[idx] =
+                            bf16::from_f32(self_item.value.to_f32() + other_item.value.to_f32());
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -217,13 +215,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Int8 => {
                 let numel = self.numel();
                 let out = UninitVec::<i8>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<i8>()
+                        .zip(other.iter_with_meta::<i8>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const i8) };
-                        let other_val = unsafe { *(other_ptr as *const i8) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -231,13 +228,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Int16 => {
                 let numel = self.numel();
                 let out = UninitVec::<i16>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<i16>()
+                        .zip(other.iter_with_meta::<i16>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const i16) };
-                        let other_val = unsafe { *(other_ptr as *const i16) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -245,13 +241,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Int32 => {
                 let numel = self.numel();
                 let out = UninitVec::<i32>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<i32>()
+                        .zip(other.iter_with_meta::<i32>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const i32) };
-                        let other_val = unsafe { *(other_ptr as *const i32) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -259,13 +254,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Int64 => {
                 let numel = self.numel();
                 let out = UninitVec::<i64>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<i64>()
+                        .zip(other.iter_with_meta::<i64>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const i64) };
-                        let other_val = unsafe { *(other_ptr as *const i64) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -273,13 +267,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Uint8 => {
                 let numel = self.numel();
                 let out = UninitVec::<u8>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<u8>()
+                        .zip(other.iter_with_meta::<u8>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *self_ptr };
-                        let other_val = unsafe { *other_ptr };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -287,13 +280,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Uint16 => {
                 let numel = self.numel();
                 let out = UninitVec::<u16>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<u16>()
+                        .zip(other.iter_with_meta::<u16>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const u16) };
-                        let other_val = unsafe { *(other_ptr as *const u16) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -301,13 +293,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Uint32 => {
                 let numel = self.numel();
                 let out = UninitVec::<u32>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<u32>()
+                        .zip(other.iter_with_meta::<u32>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const u32) };
-                        let other_val = unsafe { *(other_ptr as *const u32) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)
@@ -315,13 +306,12 @@ impl<S: StorageTrait> TensorBase<S> {
             DType::Uint64 => {
                 let numel = self.numel();
                 let out = UninitVec::<u64>::new(numel).init_with(|dst| {
-                    for (idx, (self_elem, other_elem)) in self.iter().zip(other.iter()).enumerate()
+                    for (idx, (self_item, other_item)) in self
+                        .iter_with_meta::<u64>()
+                        .zip(other.iter_with_meta::<u64>())
+                        .enumerate()
                     {
-                        let self_ptr = unsafe { self_elem.as_ptr(self.as_ptr()) };
-                        let other_ptr = unsafe { other_elem.as_ptr(other.as_ptr()) };
-                        let self_val = unsafe { *(self_ptr as *const u64) };
-                        let other_val = unsafe { *(other_ptr as *const u64) };
-                        dst[idx] = self_val + other_val;
+                        dst[idx] = *self_item.value + *other_item.value;
                     }
                 });
                 Tensor::from_vec(out, self.shape)

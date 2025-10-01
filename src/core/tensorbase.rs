@@ -1627,12 +1627,8 @@ impl<S: StorageTrait> TensorBase<S> {
         T: Copy + 'static + TensorElement,
     {
         let output: Vec<T> = self
-            .iter()
-            .map(|elem| {
-                let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                let value = unsafe { *(ptr as *const T) };
-                f(&value)
-            })
+            .iter_with_meta::<T>()
+            .map(|item| f(item.value))
             .collect();
 
         Tensor::from_vec(output, self.shape)

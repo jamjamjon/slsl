@@ -79,29 +79,57 @@ impl<S: StorageTrait> TensorBase<S> {
                 _ => anyhow::bail!("Min not supported for dtype {:?}", self.dtype()),
             }
         } else {
-            let min_val = self
-                .iter()
-                .map(|elem| {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    unsafe {
-                        match self.dtype() {
-                            DType::Fp32 => *(ptr as *const f32) as f64,
-                            DType::Fp64 => *(ptr as *const f64),
-                            DType::Fp16 => f64::from(*(ptr as *const f16)),
-                            DType::Bf16 => f64::from(*(ptr as *const bf16)),
-                            DType::Int8 => *(ptr as *const i8) as f64,
-                            DType::Int16 => *(ptr as *const i16) as f64,
-                            DType::Int32 => *(ptr as *const i32) as f64,
-                            DType::Int64 => *(ptr as *const i64) as f64,
-                            DType::Uint8 => *ptr as f64,
-                            DType::Uint16 => *ptr as f64,
-                            DType::Uint32 => *ptr as f64,
-                            DType::Uint64 => *ptr as f64,
-                            _ => panic!("Unsupported dtype for min"), // Should not happen due to outer match
-                        }
-                    }
-                })
-                .fold(f64::INFINITY, |a, b| a.min(b));
+            let min_val = match self.dtype() {
+                DType::Fp32 => self
+                    .iter_with_meta::<f32>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Fp64 => self
+                    .iter_with_meta::<f64>()
+                    .map(|it| *it.value)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Fp16 => self
+                    .iter_with_meta::<f16>()
+                    .map(|it| f64::from(*it.value))
+                    .fold(f64::INFINITY, f64::min),
+                DType::Bf16 => self
+                    .iter_with_meta::<bf16>()
+                    .map(|it| f64::from(*it.value))
+                    .fold(f64::INFINITY, f64::min),
+                DType::Int8 => self
+                    .iter_with_meta::<i8>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Int16 => self
+                    .iter_with_meta::<i16>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Int32 => self
+                    .iter_with_meta::<i32>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Int64 => self
+                    .iter_with_meta::<i64>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Uint8 => self
+                    .iter_with_meta::<u8>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Uint16 => self
+                    .iter_with_meta::<u16>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Uint32 => self
+                    .iter_with_meta::<u32>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                DType::Uint64 => self
+                    .iter_with_meta::<u64>()
+                    .map(|it| *it.value as f64)
+                    .fold(f64::INFINITY, f64::min),
+                _ => unreachable!(),
+            };
 
             Ok(T::from_f64(min_val))
         }
@@ -288,10 +316,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![f32::INFINITY; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f32) };
+                for item in self.iter_with_meta::<f32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -319,10 +346,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![f64::INFINITY; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f64) };
+                for item in self.iter_with_meta::<f64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -350,10 +376,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![f16::from_f32(f32::INFINITY); result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f16) };
+                for item in self.iter_with_meta::<f16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -381,10 +406,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![bf16::from_f32(f32::INFINITY); result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const bf16) };
+                for item in self.iter_with_meta::<bf16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -412,10 +436,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![i8::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i8) };
+                for item in self.iter_with_meta::<i8>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -443,10 +466,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![i16::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i16) };
+                for item in self.iter_with_meta::<i16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -474,10 +496,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![i32::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i32) };
+                for item in self.iter_with_meta::<i32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -505,10 +526,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![i64::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const i64) };
+                for item in self.iter_with_meta::<i64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -536,10 +556,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![u8::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr };
+                for item in self.iter_with_meta::<u8>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -567,10 +586,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![u16::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u16) };
+                for item in self.iter_with_meta::<u16>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -598,10 +616,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![u32::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u32) };
+                for item in self.iter_with_meta::<u32>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {
@@ -630,10 +647,9 @@ impl<S: StorageTrait> TensorBase<S> {
                 let mut result_data = vec![u64::MAX; result_size];
                 let mut result_indices = vec![0; new_shape.len()];
 
-                for elem in self.iter() {
-                    let i = elem.indices;
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const u64) };
+                for item in self.iter_with_meta::<u64>() {
+                    let i = item.indices;
+                    let val = *item.value;
                     let mut current_dim = 0;
                     for k in 0..self.rank() {
                         if k == dim_index {

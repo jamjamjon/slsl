@@ -362,110 +362,86 @@ impl<S: StorageTrait> TensorBase<S> {
             // Floating point types - accumulate directly as f64
             DType::Fp32 => {
                 let mut sum = 0.0f64;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as f64 };
-                    sum += val;
+                for item in self.iter_with_meta::<f32>() {
+                    sum += *item.value as f64;
                 }
                 Ok(sum)
             }
             DType::Fp64 => {
                 let mut sum = 0.0f64;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *(ptr as *const f64) };
-                    sum += val;
+                for item in self.iter_with_meta::<f64>() {
+                    sum += *item.value;
                 }
                 Ok(sum)
             }
             DType::Fp16 => {
                 let mut sum = 0.0f64;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { f64::from(*(ptr as *const f16)) };
-                    sum += val;
+                for item in self.iter_with_meta::<f16>() {
+                    sum += item.value.to_f64();
                 }
                 Ok(sum)
             }
             DType::Bf16 => {
                 let mut sum = 0.0f64;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { f64::from(*(ptr as *const bf16)) };
-                    sum += val;
+                for item in self.iter_with_meta::<bf16>() {
+                    sum += item.value.to_f64();
                 }
                 Ok(sum)
             }
             // Integer types - use appropriate accumulator types to avoid overflow
             DType::Uint8 => {
                 let mut sum: u64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as u64 };
-                    sum += val;
+                for item in self.iter_with_meta::<u8>() {
+                    sum += *item.value as u64;
                 }
                 Ok(sum as f64)
             }
             DType::Int8 => {
                 let mut sum: i64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as i64 };
-                    sum += val;
+                for item in self.iter_with_meta::<i8>() {
+                    sum += *item.value as i64;
                 }
                 Ok(sum as f64)
             }
             DType::Uint16 => {
                 let mut sum: u64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as u64 };
-                    sum += val;
+                for item in self.iter_with_meta::<u16>() {
+                    sum += *item.value as u64;
                 }
                 Ok(sum as f64)
             }
             DType::Int16 => {
                 let mut sum: i64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as i64 };
-                    sum += val;
+                for item in self.iter_with_meta::<i16>() {
+                    sum += *item.value as i64;
                 }
                 Ok(sum as f64)
             }
             DType::Uint32 => {
                 let mut sum: u64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as u64 };
-                    sum += val;
+                for item in self.iter_with_meta::<u32>() {
+                    sum += *item.value as u64;
                 }
                 Ok(sum as f64)
             }
             DType::Int32 => {
                 let mut sum: i64 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as i64 };
-                    sum += val;
+                for item in self.iter_with_meta::<i32>() {
+                    sum += *item.value as i64;
                 }
                 Ok(sum as f64)
             }
             DType::Uint64 => {
                 let mut sum: u128 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as u128 };
-                    sum += val;
+                for item in self.iter_with_meta::<u64>() {
+                    sum += *item.value as u128;
                 }
                 Ok(sum as f64)
             }
             DType::Int64 => {
                 let mut sum: i128 = 0;
-                for elem in self.iter() {
-                    let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                    let val = unsafe { *ptr as i128 };
-                    sum += val;
+                for item in self.iter_with_meta::<i64>() {
+                    sum += *item.value as i128;
                 }
                 Ok(sum as f64)
             }

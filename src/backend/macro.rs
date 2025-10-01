@@ -1760,7 +1760,7 @@ macro_rules! impl_max_v {
                     if x.is_empty() {
                         panic!("Cannot find maximum of empty vector");
                     }
-                    x.iter().fold(x[0], |a, &b| a.max(b))
+                    *x.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&x[0])
                 }
             }
         )+
@@ -1778,7 +1778,7 @@ macro_rules! impl_min_v {
                     if x.is_empty() {
                         panic!("Cannot find minimum of empty vector");
                     }
-                    x.iter().fold(x[0], |a, &b| a.min(b))
+                    *x.iter().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&x[0])
                 }
             }
         )+
@@ -1796,15 +1796,17 @@ macro_rules! impl_max_vi {
                     if x.is_empty() {
                         panic!("Cannot find maximum of empty vector");
                     }
-                    x.iter()
+                    let (idx, val) = x.iter()
                         .enumerate()
-                        .fold((x[0], 0), |(max_val, max_idx), (i, &val)| {
-                            if val > max_val {
-                                (val, i as u64)
-                            } else {
-                                (max_val, max_idx)
+                        .max_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => b.0.cmp(&a.0), // Reverse index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
                             }
                         })
+                        .unwrap_or((0, &x[0]));
+                    (*val, idx as u64)
                 }
             }
         )+
@@ -1822,15 +1824,17 @@ macro_rules! impl_min_vi {
                     if x.is_empty() {
                         panic!("Cannot find minimum of empty vector");
                     }
-                    x.iter()
+                    let (idx, val) = x.iter()
                         .enumerate()
-                        .fold((x[0], 0), |(min_val, min_idx), (i, &val)| {
-                            if val < min_val {
-                                (val, i as u64)
-                            } else {
-                                (min_val, min_idx)
+                        .min_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => a.0.cmp(&b.0), // Keep index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
                             }
                         })
+                        .unwrap_or((0, &x[0]));
+                    (*val, idx as u64)
                 }
             }
         )+
@@ -1846,7 +1850,9 @@ macro_rules! impl_max_v_half {
             if x.is_empty() {
                 panic!("Cannot find maximum of empty vector");
             }
-            x.iter().fold(x[0], |a, &b| a.max(b))
+            *x.iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0])
         }
 
         #[inline(always)]
@@ -1854,7 +1860,9 @@ macro_rules! impl_max_v_half {
             if x.is_empty() {
                 panic!("Cannot find maximum of empty vector");
             }
-            x.iter().fold(x[0], |a, &b| a.max(b))
+            *x.iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0])
         }
     };
 }
@@ -1868,7 +1876,9 @@ macro_rules! impl_min_v_half {
             if x.is_empty() {
                 panic!("Cannot find minimum of empty vector");
             }
-            x.iter().fold(x[0], |a, &b| a.min(b))
+            *x.iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0])
         }
 
         #[inline(always)]
@@ -1876,7 +1886,9 @@ macro_rules! impl_min_v_half {
             if x.is_empty() {
                 panic!("Cannot find minimum of empty vector");
             }
-            x.iter().fold(x[0], |a, &b| a.min(b))
+            *x.iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0])
         }
     };
 }
@@ -1890,15 +1902,18 @@ macro_rules! impl_max_vi_half {
             if x.is_empty() {
                 panic!("Cannot find maximum of empty vector");
             }
-            x.iter()
+            let (idx, val) = x
+                .iter()
                 .enumerate()
-                .fold((x[0], 0), |(max_val, max_idx), (i, &val)| {
-                    if val > max_val {
-                        (val, i as u64)
-                    } else {
-                        (max_val, max_idx)
+                .max_by(|a, b| {
+                    match a.1.partial_cmp(b.1) {
+                        Some(std::cmp::Ordering::Equal) => b.0.cmp(&a.0), // Reverse index order for equal values
+                        Some(ordering) => ordering,
+                        None => std::cmp::Ordering::Equal,
                     }
                 })
+                .unwrap_or((0, &x[0]));
+            (*val, idx as u64)
         }
 
         #[inline(always)]
@@ -1906,15 +1921,18 @@ macro_rules! impl_max_vi_half {
             if x.is_empty() {
                 panic!("Cannot find maximum of empty vector");
             }
-            x.iter()
+            let (idx, val) = x
+                .iter()
                 .enumerate()
-                .fold((x[0], 0), |(max_val, max_idx), (i, &val)| {
-                    if val > max_val {
-                        (val, i as u64)
-                    } else {
-                        (max_val, max_idx)
+                .max_by(|a, b| {
+                    match a.1.partial_cmp(b.1) {
+                        Some(std::cmp::Ordering::Equal) => b.0.cmp(&a.0), // Reverse index order for equal values
+                        Some(ordering) => ordering,
+                        None => std::cmp::Ordering::Equal,
                     }
                 })
+                .unwrap_or((0, &x[0]));
+            (*val, idx as u64)
         }
     };
 }
@@ -1928,15 +1946,18 @@ macro_rules! impl_min_vi_half {
             if x.is_empty() {
                 panic!("Cannot find minimum of empty vector");
             }
-            x.iter()
+            let (idx, val) = x
+                .iter()
                 .enumerate()
-                .fold((x[0], 0), |(min_val, min_idx), (i, &val)| {
-                    if val < min_val {
-                        (val, i as u64)
-                    } else {
-                        (min_val, min_idx)
+                .min_by(|a, b| {
+                    match a.1.partial_cmp(b.1) {
+                        Some(std::cmp::Ordering::Equal) => a.0.cmp(&b.0), // Keep index order for equal values
+                        Some(ordering) => ordering,
+                        None => std::cmp::Ordering::Equal,
                     }
                 })
+                .unwrap_or((0, &x[0]));
+            (*val, idx as u64)
         }
 
         #[inline(always)]
@@ -1944,15 +1965,18 @@ macro_rules! impl_min_vi_half {
             if x.is_empty() {
                 panic!("Cannot find minimum of empty vector");
             }
-            x.iter()
+            let (idx, val) = x
+                .iter()
                 .enumerate()
-                .fold((x[0], 0), |(min_val, min_idx), (i, &val)| {
-                    if val < min_val {
-                        (val, i as u64)
-                    } else {
-                        (min_val, min_idx)
+                .min_by(|a, b| {
+                    match a.1.partial_cmp(b.1) {
+                        Some(std::cmp::Ordering::Equal) => a.0.cmp(&b.0), // Keep index order for equal values
+                        Some(ordering) => ordering,
+                        None => std::cmp::Ordering::Equal,
                     }
                 })
+                .unwrap_or((0, &x[0]));
+            (*val, idx as u64)
         }
     };
 }
@@ -1968,9 +1992,9 @@ macro_rules! impl_min_max_v {
                     if x.is_empty() {
                         panic!("Cannot find min/max of empty vector");
                     }
-                    x.iter().fold((x[0], x[0]), |(min_val, max_val), &val| {
-                        (min_val.min(val), max_val.max(val))
-                    })
+                    let min_val = *x.iter().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&x[0]);
+                    let max_val = *x.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&x[0]);
+                    (min_val, max_val)
                 }
             }
         )+
@@ -2022,13 +2046,29 @@ macro_rules! impl_min_max_i {
                     if x.is_empty() {
                         panic!("Cannot find min/max indices of empty vector");
                     }
-                    x.iter()
+                    let min_idx = x.iter()
                         .enumerate()
-                        .fold((0, 0), |(min_idx, max_idx), (i, &val)| {
-                            let new_min_idx = if val < x[min_idx as usize] { i as u64 } else { min_idx };
-                            let new_max_idx = if val > x[max_idx as usize] { i as u64 } else { max_idx };
-                            (new_min_idx, new_max_idx)
+                        .min_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => a.0.cmp(&b.0), // Keep index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
+                            }
                         })
+                        .unwrap_or((0, &x[0]))
+                        .0 as u64;
+                    let max_idx = x.iter()
+                        .enumerate()
+                        .max_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => b.0.cmp(&a.0), // Reverse index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
+                            }
+                        })
+                        .unwrap_or((0, &x[0]))
+                        .0 as u64;
+                    (min_idx, max_idx)
                 }
             }
         )+
@@ -2044,9 +2084,15 @@ macro_rules! impl_min_max_v_half {
             if x.is_empty() {
                 panic!("Cannot find min/max of empty vector");
             }
-            x.iter().fold((x[0], x[0]), |(min_val, max_val), &val| {
-                (min_val.min(val), max_val.max(val))
-            })
+            let min_val = *x
+                .iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0]);
+            let max_val = *x
+                .iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0]);
+            (min_val, max_val)
         }
 
         #[inline(always)]
@@ -2054,9 +2100,15 @@ macro_rules! impl_min_max_v_half {
             if x.is_empty() {
                 panic!("Cannot find min/max of empty vector");
             }
-            x.iter().fold((x[0], x[0]), |(min_val, max_val), &val| {
-                (min_val.min(val), max_val.max(val))
-            })
+            let min_val = *x
+                .iter()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0]);
+            let max_val = *x
+                .iter()
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(&x[0]);
+            (min_val, max_val)
         }
     };
 }
@@ -2124,21 +2176,19 @@ macro_rules! impl_min_max_i_half {
             if x.is_empty() {
                 panic!("Cannot find min/max indices of empty vector");
             }
-            x.iter()
+            let min_idx = x
+                .iter()
                 .enumerate()
-                .fold((0, 0), |(min_idx, max_idx), (i, &val)| {
-                    let new_min_idx = if val < x[min_idx as usize] {
-                        i as u64
-                    } else {
-                        min_idx
-                    };
-                    let new_max_idx = if val > x[max_idx as usize] {
-                        i as u64
-                    } else {
-                        max_idx
-                    };
-                    (new_min_idx, new_max_idx)
-                })
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64;
+            let max_idx = x
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64;
+            (min_idx, max_idx)
         }
 
         #[inline(always)]
@@ -2146,21 +2196,19 @@ macro_rules! impl_min_max_i_half {
             if x.is_empty() {
                 panic!("Cannot find min/max indices of empty vector");
             }
-            x.iter()
+            let min_idx = x
+                .iter()
                 .enumerate()
-                .fold((0, 0), |(min_idx, max_idx), (i, &val)| {
-                    let new_min_idx = if val < x[min_idx as usize] {
-                        i as u64
-                    } else {
-                        min_idx
-                    };
-                    let new_max_idx = if val > x[max_idx as usize] {
-                        i as u64
-                    } else {
-                        max_idx
-                    };
-                    (new_min_idx, new_max_idx)
-                })
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64;
+            let max_idx = x
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64;
+            (min_idx, max_idx)
         }
     };
 }
@@ -2178,14 +2226,15 @@ macro_rules! impl_min_i {
                     }
                     x.iter()
                         .enumerate()
-                        .fold((0, x[0]), |(min_idx, min_val), (i, &val)| {
-                            if val < min_val {
-                                (i as u64, val)
-                            } else {
-                                (min_idx, min_val)
+                        .min_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => a.0.cmp(&b.0), // Keep index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
                             }
                         })
-                        .0
+                        .unwrap_or((0, &x[0]))
+                        .0 as u64
                 }
             }
         )+
@@ -2205,14 +2254,15 @@ macro_rules! impl_max_i {
                     }
                     x.iter()
                         .enumerate()
-                        .fold((0, x[0]), |(max_idx, max_val), (i, &val)| {
-                            if val > max_val {
-                                (i as u64, val)
-                            } else {
-                                (max_idx, max_val)
+                        .max_by(|a, b| {
+                            match a.1.partial_cmp(b.1) {
+                                Some(std::cmp::Ordering::Equal) => b.0.cmp(&a.0), // Reverse index order for equal values
+                                Some(ordering) => ordering,
+                                None => std::cmp::Ordering::Equal,
                             }
                         })
-                        .0
+                        .unwrap_or((0, &x[0]))
+                        .0 as u64
                 }
             }
         )+
@@ -2230,14 +2280,9 @@ macro_rules! impl_min_i_half {
             }
             x.iter()
                 .enumerate()
-                .fold((0, x[0]), |(min_idx, min_val), (i, &val)| {
-                    if val < min_val {
-                        (i as u64, val)
-                    } else {
-                        (min_idx, min_val)
-                    }
-                })
-                .0
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64
         }
 
         #[inline(always)]
@@ -2247,14 +2292,9 @@ macro_rules! impl_min_i_half {
             }
             x.iter()
                 .enumerate()
-                .fold((0, x[0]), |(min_idx, min_val), (i, &val)| {
-                    if val < min_val {
-                        (i as u64, val)
-                    } else {
-                        (min_idx, min_val)
-                    }
-                })
-                .0
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64
         }
     };
 }
@@ -2270,14 +2310,9 @@ macro_rules! impl_max_i_half {
             }
             x.iter()
                 .enumerate()
-                .fold((0, x[0]), |(max_idx, max_val), (i, &val)| {
-                    if val > max_val {
-                        (i as u64, val)
-                    } else {
-                        (max_idx, max_val)
-                    }
-                })
-                .0
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64
         }
 
         #[inline(always)]
@@ -2287,14 +2322,9 @@ macro_rules! impl_max_i_half {
             }
             x.iter()
                 .enumerate()
-                .fold((0, x[0]), |(max_idx, max_val), (i, &val)| {
-                    if val > max_val {
-                        (i as u64, val)
-                    } else {
-                        (max_idx, max_val)
-                    }
-                })
-                .0
+                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or((0, &x[0]))
+                .0 as u64
         }
     };
 }

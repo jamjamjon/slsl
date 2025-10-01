@@ -332,10 +332,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut mins = vec![f32::INFINITY; result_size];
                     let mut argmins = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<f32>() };
+                    for item in self.iter_with_meta::<f32>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -371,10 +370,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut mins = vec![f64::INFINITY; result_size];
                     let mut argmins = vec![0u64; result_size];
 
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *ptr.cast::<f64>() };
+                    for item in self.iter_with_meta::<f64>() {
+                        let idx = item.indices;
+                        let val = *item.value;
 
                         let mut out_coords = Vec::with_capacity(new_shape.len());
                         for j in 0..self.rank() {
@@ -406,54 +404,80 @@ impl<S: StorageTrait> TensorBase<S> {
                     ))
                 }
                 _ => {
-                    // For other data types, convert to f64 for comparison
-                    let mut mins = vec![f64::INFINITY; result_size];
-                    let mut argmins = vec![0u64; result_size];
-
-                    for elem in self.iter() {
-                        let idx = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val_f64 = match self.dtype() {
-                            DType::Fp16 => unsafe { (*ptr.cast::<f16>()).to_f64() },
-                            DType::Bf16 => unsafe { (*ptr.cast::<bf16>()).to_f64() },
-                            DType::Int8 => unsafe { (*ptr.cast::<i8>()) as f64 },
-                            DType::Int16 => unsafe { (*ptr.cast::<i16>()) as f64 },
-                            DType::Int32 => unsafe { (*ptr.cast::<i32>()) as f64 },
-                            DType::Int64 => unsafe { (*ptr.cast::<i64>()) as f64 },
-                            DType::Uint8 => unsafe { (*ptr.cast::<u8>()) as f64 },
-                            DType::Uint16 => unsafe { (*ptr.cast::<u16>()) as f64 },
-                            DType::Uint32 => unsafe { (*ptr.cast::<u32>()) as f64 },
-                            DType::Uint64 => unsafe { (*ptr.cast::<u64>()) as f64 },
-                            _ => unreachable!(),
-                        };
-
-                        let mut out_coords = Vec::with_capacity(new_shape.len());
-                        for j in 0..self.rank() {
-                            if j == dim_index {
-                                if keepdim {
-                                    out_coords.push(0usize);
-                                } else {
-                                    continue;
+                    // Typed dispatch using iter_with_meta::<T>() to avoid untyped iteration
+                    macro_rules! dispatch {
+                        ($ty:ty) => {{
+                            let mut mins = vec![f64::INFINITY; result_size];
+                            let mut argmins = vec![0u64; result_size];
+                            for item in self.iter_with_meta::<$ty>() {
+                                let idx = item.indices;
+                                let val_f64 = (*item.value) as f64;
+                                let mut out_coords = Vec::with_capacity(new_shape.len());
+                                for j in 0..self.rank() {
+                                    if j == dim_index {
+                                        if keepdim {
+                                            out_coords.push(0usize);
+                                        } else {
+                                            continue;
+                                        }
+                                    } else {
+                                        out_coords.push(idx[j]);
+                                    }
                                 }
-                            } else {
-                                out_coords.push(idx[j]);
+                                let mut out_linear = 0usize;
+                                for (k, &c) in out_coords.iter().enumerate() {
+                                    out_linear = out_linear * new_shape[k] + c;
+                                }
+                                if val_f64 < mins[out_linear] {
+                                    mins[out_linear] = val_f64;
+                                    argmins[out_linear] = idx[dim_index] as u64;
+                                }
                             }
-                        }
-
-                        let mut out_linear = 0usize;
-                        for (k, &c) in out_coords.iter().enumerate() {
-                            out_linear = out_linear * new_shape[k] + c;
-                        }
-
-                        if val_f64 < mins[out_linear] {
-                            mins[out_linear] = val_f64;
-                            argmins[out_linear] = idx[dim_index] as u64;
-                        }
+                            Ok((
+                                Tensor::from_vec(
+                                    mins.into_iter().map(|v| v as $ty).collect::<Vec<$ty>>(),
+                                    new_shape,
+                                )?,
+                                Tensor::from_vec(argmins, new_shape)?,
+                            ))
+                        }};
                     }
-
-                    // Convert back to original dtype
                     match self.dtype() {
+                        DType::Int8 => dispatch!(i8),
+                        DType::Int16 => dispatch!(i16),
+                        DType::Int32 => dispatch!(i32),
+                        DType::Int64 => dispatch!(i64),
+                        DType::Uint8 => dispatch!(u8),
+                        DType::Uint16 => dispatch!(u16),
+                        DType::Uint32 => dispatch!(u32),
+                        DType::Uint64 => dispatch!(u64),
                         DType::Fp16 => {
+                            let mut mins = vec![f64::INFINITY; result_size];
+                            let mut argmins = vec![0u64; result_size];
+                            for item in self.iter_with_meta::<f16>() {
+                                let idx = item.indices;
+                                let val_f64 = item.value.to_f64();
+                                let mut out_coords = Vec::with_capacity(new_shape.len());
+                                for j in 0..self.rank() {
+                                    if j == dim_index {
+                                        if keepdim {
+                                            out_coords.push(0usize);
+                                        } else {
+                                            continue;
+                                        }
+                                    } else {
+                                        out_coords.push(idx[j]);
+                                    }
+                                }
+                                let mut out_linear = 0usize;
+                                for (k, &c) in out_coords.iter().enumerate() {
+                                    out_linear = out_linear * new_shape[k] + c;
+                                }
+                                if val_f64 < mins[out_linear] {
+                                    mins[out_linear] = val_f64;
+                                    argmins[out_linear] = idx[dim_index] as u64;
+                                }
+                            }
                             let vals: Vec<f16> = mins.into_iter().map(f16::from_f64).collect();
                             Ok((
                                 Tensor::from_vec(vals, new_shape)?,
@@ -461,63 +485,33 @@ impl<S: StorageTrait> TensorBase<S> {
                             ))
                         }
                         DType::Bf16 => {
+                            let mut mins = vec![f64::INFINITY; result_size];
+                            let mut argmins = vec![0u64; result_size];
+                            for item in self.iter_with_meta::<bf16>() {
+                                let idx = item.indices;
+                                let val_f64 = item.value.to_f64();
+                                let mut out_coords = Vec::with_capacity(new_shape.len());
+                                for j in 0..self.rank() {
+                                    if j == dim_index {
+                                        if keepdim {
+                                            out_coords.push(0usize);
+                                        } else {
+                                            continue;
+                                        }
+                                    } else {
+                                        out_coords.push(idx[j]);
+                                    }
+                                }
+                                let mut out_linear = 0usize;
+                                for (k, &c) in out_coords.iter().enumerate() {
+                                    out_linear = out_linear * new_shape[k] + c;
+                                }
+                                if val_f64 < mins[out_linear] {
+                                    mins[out_linear] = val_f64;
+                                    argmins[out_linear] = idx[dim_index] as u64;
+                                }
+                            }
                             let vals: Vec<bf16> = mins.into_iter().map(bf16::from_f64).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Int8 => {
-                            let vals: Vec<i8> = mins.into_iter().map(|v| v as i8).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Int16 => {
-                            let vals: Vec<i16> = mins.into_iter().map(|v| v as i16).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Int32 => {
-                            let vals: Vec<i32> = mins.into_iter().map(|v| v as i32).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Int64 => {
-                            let vals: Vec<i64> = mins.into_iter().map(|v| v as i64).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Uint8 => {
-                            let vals: Vec<u8> = mins.into_iter().map(|v| v as u8).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Uint16 => {
-                            let vals: Vec<u16> = mins.into_iter().map(|v| v as u16).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Uint32 => {
-                            let vals: Vec<u32> = mins.into_iter().map(|v| v as u32).collect();
-                            Ok((
-                                Tensor::from_vec(vals, new_shape)?,
-                                Tensor::from_vec(argmins, new_shape)?,
-                            ))
-                        }
-                        DType::Uint64 => {
-                            let vals: Vec<u64> = mins.into_iter().map(|v| v as u64).collect();
                             Ok((
                                 Tensor::from_vec(vals, new_shape)?,
                                 Tensor::from_vec(argmins, new_shape)?,

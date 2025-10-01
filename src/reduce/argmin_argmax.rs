@@ -359,10 +359,9 @@ impl<S: StorageTrait> TensorBase<S> {
                     let mut argmaxs = vec![0u64; result_size];
                     let mut idx_buf = vec![0; new_shape.len()];
 
-                    for elem in self.iter() {
-                        let i = elem.indices;
-                        let ptr = unsafe { elem.as_ptr(self.as_ptr()) };
-                        let val = unsafe { *(ptr as *const $t) };
+                    for item in self.iter_with_meta::<$t>() {
+                        let i = item.indices;
+                        let val = *item.value;
                         let mut current_dim = 0;
                         for k in 0..self.rank() {
                             if k == dim_index {

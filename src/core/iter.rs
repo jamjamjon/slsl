@@ -1,99 +1,57 @@
-#[cfg(feature = "rayon")]
-use rayon::iter::{
-    plumbing::{bridge, Consumer, Producer, ProducerCallback},
-    IndexedParallelIterator, IntoParallelIterator, ParallelIterator,
-};
 use std::marker::PhantomData;
 
-use crate::{ArrayUsize8, DType, StorageTrait, TensorBase};
+use crate::{ArrayUsize8, StorageTrait, TensorBase, TensorElement};
 
-/// Thread-safe element reference for parallel iteration
-#[derive(Clone, Copy)]
-pub struct TensorIterElement {
-    /// Indices of the element
-    pub indices: ArrayUsize8,
-    /// Offset in bytes from the tensor's base pointer
-    pub offset: usize,
-}
-
-impl TensorIterElement {
-    /// Get a pointer to the element data given the tensor's base pointer
-    ///
-    /// # Safety
-    /// The caller must ensure that:
-    /// - The base_ptr is valid and points to the tensor's data
-    /// - The offset is within the tensor's bounds
-    /// - The returned pointer is used safely
-    #[inline]
-    pub unsafe fn as_ptr(&self, base_ptr: *const u8) -> *const u8 {
-        base_ptr.add(self.offset)
-    }
-
-    /// Get a mutable pointer to the element data given the tensor's base pointer
-    ///
-    /// # Safety
-    /// The caller must ensure that:
-    /// - The base_ptr is valid and points to the tensor's data
-    /// - The offset is within the tensor's bounds
-    /// - The returned pointer is used safely
-    /// - No other references to this data exist
-    #[inline]
-    pub unsafe fn as_mut_ptr(&self, base_ptr: *mut u8) -> *mut u8 {
-        base_ptr.add(self.offset)
-    }
-}
-
-/// Iterator over all elements in a tensor
+/// Generic iterator over tensor elements of type T
 #[repr(C)]
-pub struct TensorIter<'a, S: StorageTrait> {
+pub struct TensorTypeIter<'a, S: StorageTrait, T> {
     /// Reference to the original tensor
     tensor: &'a TensorBase<S>,
     /// Current pointer position
-    ptr: *mut u8,
+    ptr: *const T,
     /// End pointer boundary
-    end_ptr: *mut u8,
-    /// Original starting pointer (for offset calculation)
-    original_ptr: *mut u8,
-    /// Current indices for multi-dimensional access
-    current_indices: ArrayUsize8,
-    /// Data type
-    dtype: DType,
-    /// Maximum elements to yield (used only for split iterators)
-    max_elements: Option<usize>,
-    /// Elements yielded so far (used only for split iterators)
-    elements_yielded: usize,
+    end_ptr: *const T,
+    /// Cached total length (for fast len() calls)
+    cached_len: usize,
+    /// Current linear index (for contiguous tensors)
+    current_index: usize,
+    /// Tail linear index for double-ended iteration (contiguous tensors)
+    tail_index: usize,
+    /// Whether the tensor is contiguous (optimization flag)
+    is_contiguous: bool,
     /// Lifetime marker
     _phantom: PhantomData<&'a ()>,
 }
 
-// Safety: TensorIterElement is Send because it only contains indices and offset
-unsafe impl Send for TensorIterElement {}
-unsafe impl Sync for TensorIterElement {}
+// Safety: TensorTypeIter is Send/Sync because it only contains raw pointers and indices
+unsafe impl<S: StorageTrait, T> Send for TensorTypeIter<'_, S, T> {}
+unsafe impl<S: StorageTrait, T> Sync for TensorTypeIter<'_, S, T> {}
 
-impl<'a, S: StorageTrait> TensorIter<'a, S> {
-    /// Create iterator from Tensor
+impl<'a, S: StorageTrait, T: TensorElement> TensorTypeIter<'a, S, T> {
+    /// Create iterator from Tensor for specific type T
     #[inline]
     pub fn from_tensor(tensor: &'a TensorBase<S>) -> Self {
-        let data_ptr = tensor.as_ptr() as *mut u8;
-        let numel = tensor.numel();
-        let element_size = tensor.dtype.size_in_bytes();
-        let end_ptr = unsafe { data_ptr.add(numel * element_size) };
+        debug_assert_eq!(
+            tensor.dtype,
+            T::DTYPE,
+            "Type mismatch: tensor has dtype {:?}, but requested type has dtype {:?}",
+            tensor.dtype,
+            T::DTYPE
+        );
 
-        // Initialize current indices to zeros
-        let mut current_indices = ArrayUsize8::empty();
-        for _ in 0..tensor.rank() {
-            current_indices.push(0);
-        }
+        let data_ptr = tensor.as_ptr() as *const T;
+        let numel = tensor.numel();
+        let end_ptr = unsafe { data_ptr.add(numel) };
+        let is_contiguous = tensor.is_contiguous();
 
         Self {
             tensor,
             ptr: data_ptr,
             end_ptr,
-            original_ptr: data_ptr,
-            current_indices,
-            dtype: tensor.dtype,
-            max_elements: None,
-            elements_yielded: 0,
+            cached_len: numel,
+            current_index: 0,
+            tail_index: numel,
+            is_contiguous,
             _phantom: PhantomData,
         }
     }
@@ -101,124 +59,103 @@ impl<'a, S: StorageTrait> TensorIter<'a, S> {
     /// Get remaining length
     #[inline(always)]
     pub fn len(&self) -> usize {
-        // For split iterators, use the limited count
-        if let Some(max) = self.max_elements {
-            return max.saturating_sub(self.elements_yielded);
+        if self.is_contiguous {
+            self.cached_len.saturating_sub(self.current_index)
+        } else {
+            ((self.end_ptr as usize - self.ptr as usize) / std::mem::size_of::<T>()).max(0)
         }
-
-        // For scalar tensors
-        if self.tensor.rank() == 0 {
-            return if self.ptr >= self.end_ptr { 0 } else { 1 };
-        }
-
-        // Calculate remaining elements based on current indices
-        if self.current_indices[0] >= self.tensor.shape[0] {
-            return 0;
-        }
-
-        // Calculate remaining elements efficiently using mathematical formula
-        let mut remaining = 0;
-        let rank = self.tensor.rank();
-
-        // Calculate the linear index of current position
-        let mut current_linear_index = 0;
-        let mut multiplier = 1;
-
-        for i in (0..rank).rev() {
-            current_linear_index += self.current_indices[i] * multiplier;
-            multiplier *= self.tensor.shape[i];
-        }
-
-        // Total elements minus current position gives remaining elements
-        let total_elements = self.tensor.numel();
-        if current_linear_index < total_elements {
-            remaining = total_elements - current_linear_index;
-        }
-
-        remaining
     }
 
     /// Check if empty
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
-        self.ptr >= self.end_ptr
+        if self.is_contiguous {
+            self.current_index >= self.cached_len
+        } else {
+            self.ptr >= self.end_ptr
+        }
     }
 
-    /// Get current indices
+    /// Split the iterator at the given index
     #[inline]
-    pub fn current_indices(&self) -> &ArrayUsize8 {
-        &self.current_indices
-    }
+    pub fn split_at(self, index: usize) -> (Self, Self) {
+        if self.is_contiguous {
+            let mid = self.current_index + index;
+            let mid = mid.min(self.cached_len);
 
-    #[cfg(feature = "rayon")]
-    /// Convert to parallel iterator (rayon style)
-    #[inline]
-    pub fn par_iter(self) -> ParTensorIter<'a, S>
-    where
-        S: Send + Sync,
-    {
-        ParTensorIter::new(self)
+            let left = TensorTypeIter {
+                tensor: self.tensor,
+                ptr: self.ptr,
+                end_ptr: self.ptr,
+                cached_len: mid - self.current_index,
+                current_index: 0,
+                tail_index: mid - self.current_index,
+                is_contiguous: self.is_contiguous,
+                _phantom: PhantomData,
+            };
+
+            let right = TensorTypeIter {
+                tensor: self.tensor,
+                ptr: unsafe { self.ptr.add(mid - self.current_index) },
+                end_ptr: self.end_ptr,
+                cached_len: self.cached_len - mid,
+                current_index: 0,
+                tail_index: self.cached_len - mid,
+                is_contiguous: self.is_contiguous,
+                _phantom: PhantomData,
+            };
+
+            (left, right)
+        } else {
+            let mid_ptr = unsafe { self.ptr.add(index) };
+            let left = TensorTypeIter {
+                tensor: self.tensor,
+                ptr: self.ptr,
+                end_ptr: mid_ptr,
+                cached_len: index,
+                current_index: 0,
+                tail_index: index,
+                is_contiguous: self.is_contiguous,
+                _phantom: PhantomData,
+            };
+
+            let right = TensorTypeIter {
+                tensor: self.tensor,
+                ptr: mid_ptr,
+                end_ptr: self.end_ptr,
+                cached_len: self.cached_len - index,
+                current_index: 0,
+                tail_index: self.cached_len - index,
+                is_contiguous: self.is_contiguous,
+                _phantom: PhantomData,
+            };
+
+            (left, right)
+        }
     }
 }
 
-impl<S: StorageTrait> Iterator for TensorIter<'_, S> {
-    type Item = TensorIterElement;
+impl<'a, S: StorageTrait, T: TensorElement + 'a> Iterator for TensorTypeIter<'a, S, T> {
+    type Item = &'a T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        // Check if we've reached the maximum elements for split iterators
-        if let Some(max) = self.max_elements {
-            if self.elements_yielded >= max {
+        if self.is_contiguous {
+            if self.current_index >= self.cached_len {
                 return None;
             }
-        }
-
-        // For scalar tensors
-        if self.tensor.rank() == 0 {
+            let current = self.ptr;
+            self.ptr = unsafe { self.ptr.add(1) };
+            self.current_index += 1;
+            Some(unsafe { &*current })
+        } else {
             if self.ptr >= self.end_ptr {
                 return None;
             }
-            self.ptr = self.end_ptr; // Mark as exhausted
-            self.elements_yielded += 1;
-            return Some(TensorIterElement {
-                indices: self.current_indices,
-                offset: 0,
-            });
+            let current = self.ptr;
+            self.ptr = unsafe { self.ptr.add(1) };
+            Some(unsafe { &*current })
         }
-
-        // Check if we've exhausted all elements by checking if first dimension overflowed
-        if self.tensor.rank() > 0 && self.current_indices[0] >= self.tensor.shape[0] {
-            return None;
-        }
-
-        let current_indices = self.current_indices;
-
-        // Calculate offset using strides for non-contiguous tensors
-        let mut offset_bytes = 0;
-        let element_size = self.dtype.size_in_bytes();
-        for (dim_idx, &index) in current_indices
-            .as_slice()
-            .iter()
-            .enumerate()
-            .take(self.tensor.rank())
-        {
-            // Only add to offset if stride is non-zero (for broadcasting)
-            if self.tensor.strides[dim_idx] != 0 {
-                // Strides are in elements, convert to bytes
-                offset_bytes += index * self.tensor.strides[dim_idx] * element_size;
-            }
-        }
-
-        let offset = offset_bytes;
-
-        // Update indices for next iteration
-        self.update_indices();
-        self.elements_yielded += 1;
-
-        Some(TensorIterElement {
-            indices: current_indices,
-            offset,
-        })
     }
 
     #[inline(always)]
@@ -234,198 +171,87 @@ impl<S: StorageTrait> Iterator for TensorIter<'_, S> {
 
     #[inline(always)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        let element_size = self.dtype.size_in_bytes();
-        let skip_bytes = element_size * n;
-        self.ptr = unsafe { self.ptr.add(skip_bytes) };
-
-        // Update indices accordingly
-        for _ in 0..n {
-            self.update_indices();
+        if self.is_contiguous {
+            let p = unsafe { self.ptr.add(n) };
+            if p >= self.end_ptr {
+                return None;
+            }
+            self.ptr = unsafe { p.add(1) };
+            self.current_index += n + 1;
+            if self.current_index > self.tail_index {
+                self.tail_index = self.current_index;
+            }
+            Some(unsafe { &*p })
+        } else {
+            let p = unsafe { self.ptr.add(n) };
+            if p >= self.end_ptr {
+                return None;
+            }
+            self.ptr = unsafe { p.add(1) };
+            Some(unsafe { &*p })
         }
-
-        self.next()
     }
 }
 
-impl<S: StorageTrait> ExactSizeIterator for TensorIter<'_, S> {}
-impl<S: StorageTrait> std::iter::FusedIterator for TensorIter<'_, S> {}
+impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for TensorTypeIter<'_, S, T> {}
+impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator for TensorTypeIter<'_, S, T> {}
 
-// Implement DoubleEndedIterator for rayon compatibility
-impl<S: StorageTrait> DoubleEndedIterator for TensorIter<'_, S> {
+// Double-ended iteration support
+impl<S: StorageTrait, T: TensorElement> DoubleEndedIterator for TensorTypeIter<'_, S, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.ptr >= self.end_ptr {
-            return None;
-        }
-
-        // Move end pointer backwards
-        let element_size = self.dtype.size_in_bytes();
-        self.end_ptr = unsafe { self.end_ptr.sub(element_size) };
-
-        let current_ptr = self.end_ptr;
-        let offset = (current_ptr as isize - self.original_ptr as isize) as usize;
-
-        // Calculate indices for this position
-        let element_index = offset / element_size;
-        let indices = self.compute_indices_at(element_index);
-
-        Some(TensorIterElement { indices, offset })
-    }
-}
-
-impl<S: StorageTrait> TensorIter<'_, S> {
-    /// Update current indices to point to the next element
-    #[inline]
-    fn update_indices(&mut self) {
-        if self.tensor.rank() == 0 {
-            return;
-        }
-
-        // Start from the rightmost dimension
-        for i in (0..self.tensor.rank()).rev() {
-            self.current_indices[i] += 1;
-            if self.current_indices[i] < self.tensor.shape[i] {
-                return; // No carry needed
+        if self.is_contiguous {
+            if self.current_index >= self.tail_index {
+                return None;
             }
-            // Carry to next dimension
-            self.current_indices[i] = 0;
-        }
-
-        // If we reach here, all dimensions have overflowed
-        // Set the first dimension to shape[0] to signal completion
-        if self.tensor.rank() > 0 {
-            self.current_indices[0] = self.tensor.shape[0];
-        }
-    }
-
-    /// Split the iterator at the given index
-    pub fn split_at(self, index: usize) -> (Self, Self) {
-        let len = self.len();
-        assert!(index <= len, "Split index {index} exceeds length {len}");
-
-        if index == 0 {
-            let empty = self.empty();
-            return (empty, self);
-        }
-        if index == len {
-            let empty = self.empty();
-            return (self, empty);
-        }
-
-        // Create left iterator with limited elements
-        let mut left = self.clone();
-        left.max_elements = Some(index);
-        left.elements_yielded = 0;
-
-        // Create right iterator by skipping first `index` elements
-        let mut right = self;
-        for _ in 0..index {
-            if right.next().is_none() {
-                break;
+            let idx = self.tail_index - 1;
+            let offset_bytes = idx * std::mem::size_of::<T>();
+            let p = unsafe { self.tensor.as_ptr().add(offset_bytes) as *const T };
+            self.tail_index = idx;
+            Some(unsafe { &*p })
+        } else {
+            if self.ptr >= self.end_ptr {
+                return None;
             }
-        }
-        // Reset elements_yielded for right iterator
-        right.elements_yielded = 0;
-
-        (left, right)
-    }
-
-    /// Compute indices at a given offset
-    fn compute_indices_at(&self, offset: usize) -> ArrayUsize8 {
-        let mut indices = ArrayUsize8::empty();
-        let mut remaining = offset;
-
-        // Convert from rightmost (fastest changing) to leftmost dimension
-        for i in (0..self.tensor.rank()).rev() {
-            let dim_size = self.tensor.shape[i];
-            indices.push(remaining % dim_size);
-            remaining /= dim_size;
-        }
-
-        // Reverse to get correct order (leftmost dimension first)
-        let mut result = ArrayUsize8::empty();
-        for i in (0..indices.len()).rev() {
-            result.push(indices[i]);
-        }
-
-        result
-    }
-
-    /// Create an empty iterator
-    fn empty(&self) -> Self {
-        Self {
-            tensor: self.tensor,
-            ptr: self.original_ptr,
-            end_ptr: self.original_ptr,
-            original_ptr: self.original_ptr,
-            current_indices: ArrayUsize8::empty(),
-            dtype: self.dtype,
-            max_elements: Some(0),
-            elements_yielded: 0,
-            _phantom: PhantomData,
+            self.end_ptr = unsafe { self.end_ptr.sub(1) };
+            Some(unsafe { &*self.end_ptr })
         }
     }
 }
 
-impl<S: StorageTrait> Clone for TensorIter<'_, S> {
-    fn clone(&self) -> Self {
-        Self {
-            tensor: self.tensor,
-            ptr: self.ptr,
-            end_ptr: self.end_ptr,
-            original_ptr: self.original_ptr,
-            current_indices: self.current_indices,
-            dtype: self.dtype,
-            max_elements: self.max_elements,
-            elements_yielded: self.elements_yielded,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-unsafe impl<S: StorageTrait> Send for TensorIter<'_, S> where S: Send {}
-unsafe impl<S: StorageTrait> Sync for TensorIter<'_, S> where S: Sync {}
-
+/// Parallel iterator over tensor elements of type T
 #[cfg(feature = "rayon")]
-pub struct ParTensorIter<'a, S: StorageTrait> {
-    inner: TensorIter<'a, S>,
-    min_len: usize,
+pub struct ParTensorTypeIter<'a, S: StorageTrait, T> {
+    inner: TensorTypeIter<'a, S, T>,
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait> ParTensorIter<'a, S> {
-    pub fn new(inner: TensorIter<'a, S>) -> Self {
-        Self { inner, min_len: 1 }
-    }
-
-    pub fn with_min_len(mut self, min_len: usize) -> Self {
-        assert_ne!(
-            min_len, 0,
-            "Minimum number of elements must be at least one"
-        );
-        self.min_len = min_len;
-        self
+impl<'a, S: StorageTrait, T: TensorElement> ParTensorTypeIter<'a, S, T> {
+    pub fn new(iter: TensorTypeIter<'a, S, T>) -> Self {
+        Self { inner: iter }
     }
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> IntoParallelIterator for TensorIter<'a, S> {
-    type Item = TensorIterElement;
-    type Iter = ParTensorIter<'a, S>;
+impl<'a, S: StorageTrait, T: TensorElement> IntoIterator for ParTensorTypeIter<'a, S, T> {
+    type Item = &'a T;
+    type IntoIter = TensorTypeIter<'a, S, T>;
 
-    fn into_par_iter(self) -> Self::Iter {
-        ParTensorIter::new(self)
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner
     }
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> ParallelIterator for ParTensorIter<'a, S> {
-    type Item = TensorIterElement;
+impl<'a, S: StorageTrait + Send + Sync, T: TensorElement + Send + Sync>
+    rayon::iter::ParallelIterator for ParTensorTypeIter<'a, S, T>
+{
+    type Item = &'a T;
 
     fn drive_unindexed<C>(self, consumer: C) -> C::Result
     where
         C: rayon::iter::plumbing::UnindexedConsumer<Self::Item>,
     {
-        bridge(self, consumer)
+        rayon::iter::plumbing::bridge(self, consumer)
     }
 
     fn opt_len(&self) -> Option<usize> {
@@ -434,96 +260,219 @@ impl<'a, S: StorageTrait + Send + Sync> ParallelIterator for ParTensorIter<'a, S
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> IndexedParallelIterator for ParTensorIter<'a, S> {
-    fn drive<C>(self, consumer: C) -> C::Result
-    where
-        C: Consumer<Self::Item>,
-    {
-        bridge(self, consumer)
-    }
-
+impl<'a, S: StorageTrait + Send + Sync, T: TensorElement + Send + Sync>
+    rayon::iter::IndexedParallelIterator for ParTensorTypeIter<'a, S, T>
+{
     fn len(&self) -> usize {
         self.inner.len()
     }
 
+    fn drive<C>(self, consumer: C) -> C::Result
+    where
+        C: rayon::iter::plumbing::Consumer<Self::Item>,
+    {
+        rayon::iter::plumbing::bridge(self, consumer)
+    }
+
     fn with_producer<CB>(self, callback: CB) -> CB::Output
     where
-        CB: ProducerCallback<Self::Item>,
+        CB: rayon::iter::plumbing::ProducerCallback<Self::Item>,
     {
-        callback.callback(ParTensorProducer {
-            inner: self.inner,
-            min_len: self.min_len,
-        })
+        callback.callback(TensorTypeIterProducer { iter: self.inner })
     }
 }
 
 #[cfg(feature = "rayon")]
-struct ParTensorProducer<'a, S: StorageTrait> {
-    inner: TensorIter<'a, S>,
-    min_len: usize,
+struct TensorTypeIterProducer<'a, S: StorageTrait, T> {
+    iter: TensorTypeIter<'a, S, T>,
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> Producer for ParTensorProducer<'a, S> {
-    type Item = TensorIterElement;
-    type IntoIter = TensorIter<'a, S>;
+impl<'a, S: StorageTrait, T: TensorElement> rayon::iter::plumbing::Producer
+    for TensorTypeIterProducer<'a, S, T>
+{
+    type Item = &'a T;
+    type IntoIter = TensorTypeIter<'a, S, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner
+        self.iter
     }
 
     fn split_at(self, index: usize) -> (Self, Self) {
-        let (left, right) = self.inner.split_at(index);
+        let (left, right) = self.iter.split_at(index);
         (
-            ParTensorProducer {
-                inner: left,
-                min_len: self.min_len,
-            },
-            ParTensorProducer {
-                inner: right,
-                min_len: self.min_len,
-            },
+            TensorTypeIterProducer { iter: left },
+            TensorTypeIterProducer { iter: right },
         )
     }
 }
 
-#[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> IntoIterator for ParTensorProducer<'a, S> {
-    type Item = TensorIterElement;
-    type IntoIter = TensorIter<'a, S>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.inner
-    }
-}
-
 impl<S: StorageTrait> TensorBase<S> {
-    /// Create an iterator over all elements in the tensor
+    /// Create a typed iterator over all elements in the tensor
     #[inline]
-    pub fn iter(&self) -> TensorIter<'_, S> {
-        TensorIter::from_tensor(self)
+    pub fn iter<T: TensorElement>(&self) -> TensorTypeIter<'_, S, T> {
+        TensorTypeIter::from_tensor(self)
     }
 
-    #[cfg(feature = "rayon")]
-    /// Create a parallel iterator over all elements in the tensor
+    /// Internal: Create a typed iterator that yields value together with indices and byte offset
+    /// This replaces the need for the untyped iterator when metadata is required.
     #[inline]
-    pub fn par_iter(&self) -> ParTensorIter<'_, S>
+    pub(crate) fn iter_with_meta<T: TensorElement>(&self) -> TensorTypeMetaIter<'_, S, T> {
+        TensorTypeMetaIter::from_tensor(self)
+    }
+
+    /// Public: return indexed typed iterator, produce (indices, &T)
+    #[inline]
+    pub fn indexed_iter<T: TensorElement>(&self) -> IndexedTensorTypeIter<'_, S, T> {
+        IndexedTensorTypeIter {
+            inner: self.iter_with_meta::<T>(),
+        }
+    }
+
+    /// Create a typed parallel iterator over all elements in the tensor
+    #[cfg(feature = "rayon")]
+    #[inline]
+    pub fn par_iter<T>(&self) -> ParTensorTypeIter<'_, S, T>
     where
         S: Send + Sync,
+        T: TensorElement + Send + Sync,
     {
-        self.iter().par_iter()
+        ParTensorTypeIter::new(self.iter::<T>())
     }
 }
 
-// Implement IntoIterator for &TensorBase to support for _ in &tensor syntax
-impl<'a, S: StorageTrait> IntoIterator for &'a TensorBase<S> {
-    type Item = TensorIterElement;
-    type IntoIter = TensorIter<'a, S>;
+/// A typed iterator yielding indices, byte offset and value reference
+pub struct TensorTypeMetaItem<'a, T> {
+    pub indices: ArrayUsize8,
+    pub offset: usize,
+    pub value: &'a T,
+}
+
+/// Typed iterator with metadata (indices and offset)
+pub struct TensorTypeMetaIter<'a, S: StorageTrait, T: TensorElement> {
+    tensor: &'a TensorBase<S>,
+    current_indices: ArrayUsize8,
+    linear_index: usize,
+    remaining: usize,
+    is_contiguous: bool,
+    element_size: usize,
+    strides_in_bytes: ArrayUsize8,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, S: StorageTrait, T: TensorElement> TensorTypeMetaIter<'a, S, T> {
+    #[inline]
+    fn from_tensor(tensor: &'a TensorBase<S>) -> Self {
+        debug_assert_eq!(tensor.dtype, T::DTYPE);
+        let mut current_indices = ArrayUsize8::empty();
+        for _ in 0..tensor.rank() {
+            current_indices.push(0);
+        }
+        let element_size = std::mem::size_of::<T>();
+        let mut strides_in_bytes = ArrayUsize8::empty();
+        for i in 0..tensor.rank() {
+            strides_in_bytes.push(tensor.strides[i] * element_size);
+        }
+        Self {
+            tensor,
+            current_indices,
+            linear_index: 0,
+            remaining: tensor.numel(),
+            is_contiguous: tensor.is_contiguous(),
+            element_size,
+            strides_in_bytes,
+            _marker: PhantomData,
+        }
+    }
 
     #[inline]
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+    fn advance_indices(&mut self) {
+        if self.tensor.rank() == 0 {
+            return;
+        }
+        for i in (0..self.tensor.rank()).rev() {
+            self.current_indices[i] += 1;
+            if self.current_indices[i] < self.tensor.shape[i] {
+                return;
+            }
+            self.current_indices[i] = 0;
+        }
     }
+}
+
+impl<'a, S: StorageTrait, T: TensorElement> Iterator for TensorTypeMetaIter<'a, S, T> {
+    type Item = TensorTypeMetaItem<'a, T>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let offset = if self.is_contiguous {
+            self.linear_index * self.element_size
+        } else {
+            let mut off = 0usize;
+            for (dim_idx, &index) in self
+                .current_indices
+                .as_slice()
+                .iter()
+                .enumerate()
+                .take(self.tensor.rank())
+            {
+                if self.tensor.strides[dim_idx] != 0 {
+                    off += index * self.strides_in_bytes[dim_idx];
+                }
+            }
+            off
+        };
+
+        let ptr = unsafe { self.tensor.as_ptr().add(offset) as *const T };
+        let value = unsafe { &*ptr };
+
+        let indices = self.current_indices;
+        self.remaining -= 1;
+        self.linear_index += 1;
+        self.advance_indices();
+
+        Some(TensorTypeMetaItem {
+            indices,
+            offset,
+            value,
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for TensorTypeMetaIter<'_, S, T> {}
+impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator for TensorTypeMetaIter<'_, S, T> {}
+
+/// Public indexed iterator adapter yielding (indices, &T)
+pub struct IndexedTensorTypeIter<'a, S: StorageTrait, T: TensorElement> {
+    inner: TensorTypeMetaIter<'a, S, T>,
+}
+
+impl<'a, S: StorageTrait, T: TensorElement> Iterator for IndexedTensorTypeIter<'a, S, T> {
+    type Item = (ArrayUsize8, &'a T);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|m| (m.indices, m.value))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for IndexedTensorTypeIter<'_, S, T> {}
+impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator
+    for IndexedTensorTypeIter<'_, S, T>
+{
 }
 
 #[cfg(test)]
@@ -537,10 +486,10 @@ mod tests {
         let data = vec![1.0f32, 2.0, 3.0, 4.0];
         let tensor = Tensor::from_vec(data, vec![2, 2]).unwrap();
 
-        let iter = tensor.iter();
+        let iter = tensor.iter::<f32>();
         assert_eq!(iter.len(), 4);
 
-        let elements: Vec<_> = iter.collect();
+        let elements: Vec<_> = tensor.iter::<f32>().collect();
         assert_eq!(elements.len(), 4);
     }
 
@@ -548,8 +497,7 @@ mod tests {
     fn test_tensor_iter_indices() {
         let data = vec![1.0f32, 2.0, 3.0, 4.0];
         let tensor = Tensor::from_vec(data, vec![2, 2]).unwrap();
-
-        let mut iter = tensor.iter();
+        let mut iter = tensor.iter_with_meta::<f32>();
         let element = iter.next().unwrap();
         assert_eq!(element.indices.as_slice(), &[0, 0]);
 
@@ -568,7 +516,7 @@ mod tests {
         let data: Vec<f32> = vec![];
         let tensor = Tensor::from_vec(data, vec![0, 0]).unwrap();
 
-        let iter = tensor.iter();
+        let iter = tensor.iter::<f32>();
         assert_eq!(iter.len(), 0);
         assert!(iter.is_empty());
     }
@@ -579,9 +527,9 @@ mod tests {
         let tensor = Tensor::from_vec(data, vec![3]).unwrap();
 
         let mut count = 0;
-        for element in &tensor {
-            assert_eq!(element.indices.len(), 1);
-            assert_eq!(element.indices[0], count);
+        for item in tensor.iter_with_meta::<f32>() {
+            assert_eq!(item.indices.len(), 1);
+            assert_eq!(item.indices[0], count);
             count += 1;
         }
         assert_eq!(count, 3);
@@ -592,10 +540,10 @@ mod tests {
         let data = vec![1.0f32, 2.0, 3.0];
         let tensor = Tensor::from_vec(data, vec![3]).unwrap();
 
-        let iter = tensor.iter();
+        let iter = tensor.iter::<f32>();
         assert_eq!(iter.len(), 3);
 
-        let elements: Vec<_> = iter.collect();
+        let elements: Vec<_> = tensor.iter::<f32>().collect();
         assert_eq!(elements.len(), 3);
     }
 
@@ -604,10 +552,10 @@ mod tests {
         let data: Vec<f32> = (0..8).map(|i| i as f32).collect();
         let tensor = Tensor::from_vec(data, vec![2, 2, 2]).unwrap();
 
-        let iter = tensor.iter();
+        let iter = tensor.iter::<f32>();
         assert_eq!(iter.len(), 8);
 
-        let elements: Vec<_> = iter.collect();
+        let elements: Vec<_> = tensor.iter::<f32>().collect();
         assert_eq!(elements.len(), 8);
     }
 
@@ -616,10 +564,9 @@ mod tests {
         let data = vec![1.0f32, 2.0, 3.0, 4.0];
         let tensor = Tensor::from_vec(data, vec![2, 2]).unwrap();
 
-        let mut iter = tensor.iter();
-        let element = iter.nth(2).unwrap();
-        let indices = element.indices;
-        assert_eq!(indices.as_slice(), &[1, 0]);
+        let mut iter = tensor.iter::<f32>();
+        let v = iter.nth(2).unwrap();
+        assert_eq!(*v, 3.0);
     }
 
     #[test]
@@ -627,7 +574,7 @@ mod tests {
         let data: Vec<f32> = (0..6).map(|i| i as f32).collect();
         let tensor = Tensor::from_vec(data, vec![2, 3]).unwrap();
 
-        let iter = tensor.iter();
+        let iter = tensor.iter::<f32>();
         let (left, right) = iter.split_at(3);
 
         assert_eq!(left.len(), 3);
@@ -647,20 +594,16 @@ mod tests {
         println!("Is contiguous: {}", transposed.is_contiguous());
 
         println!("\nIterating over transposed tensor:");
-        for (i, elem) in transposed.iter().enumerate() {
-            let ptr = unsafe { elem.as_ptr(transposed.as_ptr()) };
-            let val = unsafe { *(ptr as *const f32) };
-            println!("Element {}: indices={:?}, value={}", i, elem.indices, val);
+        for (i, item) in transposed.iter_with_meta::<f32>().enumerate() {
+            let val = *item.value;
+            println!("Element {}: indices={:?}, value={}", i, item.indices, val);
         }
 
         // Expected order for transposed tensor should be:
         // [0,0] -> 1.0, [0,1] -> 4.0, [1,0] -> 2.0, [1,1] -> 5.0, [2,0] -> 3.0, [2,1] -> 6.0
         let values: Vec<f32> = transposed
-            .iter()
-            .map(|elem| {
-                let ptr = unsafe { elem.as_ptr(transposed.as_ptr()) };
-                unsafe { *(ptr as *const f32) }
-            })
+            .iter_with_meta::<f32>()
+            .map(|item| *item.value)
             .collect();
 
         println!("Actual values: {values:?}");
@@ -673,7 +616,7 @@ mod tests {
         let data: Vec<f32> = (0..100).map(|i| i as f32).collect();
         let tensor = Tensor::from_vec(data, vec![10, 10]).unwrap();
 
-        let par_iter = tensor.par_iter();
+        let par_iter = tensor.par_iter::<f32>();
         assert_eq!(par_iter.len(), 100);
 
         let count = par_iter.count();
@@ -686,11 +629,11 @@ mod tests {
         let data: Vec<f32> = (0..10).map(|i| i as f32).collect();
         let tensor = Tensor::from_vec(data, vec![10]).unwrap();
 
-        let par_iter = tensor.par_iter();
-        let results: Vec<crate::ArrayUsize8> = par_iter.map(|element| element.indices).collect();
+        let par_iter = tensor.par_iter::<f32>();
+        let values: Vec<f32> = par_iter.map(|&v| v).collect();
 
-        assert_eq!(results.len(), 10);
-        assert_eq!(results[0].as_slice(), &[0]);
-        assert_eq!(results[9].as_slice(), &[9]);
+        assert_eq!(values.len(), 10);
+        assert_eq!(values[0], 0.0);
+        assert_eq!(values[9], 9.0);
     }
 }
