@@ -368,7 +368,7 @@ impl_into_slice_elem_for_tuple!(
     8 => (T1: t1, T2: t2, T3: t3, T4: t4, T5: t5, T6: t6, T7: t7, T8: t8)
 );
 
-// Ultra-optimized single element implementations - direct construction
+// Single element implementations - direct construction
 impl IntoSliceElem for SliceElem {
     #[inline(always)]
     fn into_slice(self) -> SliceSpecs {

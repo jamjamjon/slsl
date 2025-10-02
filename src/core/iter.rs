@@ -1,160 +1,151 @@
+use crate::{ArrayUsize8, StorageTrait, TensorBase, TensorElement};
 use std::marker::PhantomData;
 
-use crate::{ArrayUsize8, StorageTrait, TensorBase, TensorElement};
-
-/// Generic iterator over tensor elements of type T
+/// Index-based iterator - mirrors the for_at() approach
 #[repr(C)]
 pub struct TensorTypeIter<'a, S: StorageTrait, T> {
-    /// Reference to the original tensor
-    tensor: &'a TensorBase<S>,
-    /// Current pointer position
-    ptr: *const T,
-    /// End pointer boundary
-    end_ptr: *const T,
-    /// Cached total length (for fast len() calls)
-    cached_len: usize,
-    /// Current linear index (for contiguous tensors)
-    current_index: usize,
-    /// Tail linear index for double-ended iteration (contiguous tensors)
-    tail_index: usize,
-    /// Whether the tensor is contiguous (optimization flag)
+    tensor: &'a TensorBase<S>, // Needed for N-D case
+    rank: u8,                  // u8 saves space
     is_contiguous: bool,
-    /// Lifetime marker
-    _phantom: PhantomData<&'a ()>,
+
+    // Core iteration state (hot fields first for cache locality)
+    current_index: usize,
+    end_index: usize,
+    base_ptr: *const u8,
+    offset_bytes: usize,
+
+    // Pre-computed strides for fast offset calculation
+    stride_bytes: usize,     // 1D
+    cols: usize,             // 2D
+    row_stride_bytes: usize, // 2D
+    col_stride_bytes: usize, // 2D
+    _phantom: PhantomData<T>,
 }
 
-// Safety: TensorTypeIter is Send/Sync because it only contains raw pointers and indices
-unsafe impl<S: StorageTrait, T> Send for TensorTypeIter<'_, S, T> {}
-unsafe impl<S: StorageTrait, T> Sync for TensorTypeIter<'_, S, T> {}
+unsafe impl<S: StorageTrait, T: Send> Send for TensorTypeIter<'_, S, T> {}
+unsafe impl<S: StorageTrait, T: Sync> Sync for TensorTypeIter<'_, S, T> {}
 
 impl<'a, S: StorageTrait, T: TensorElement> TensorTypeIter<'a, S, T> {
-    /// Create iterator from Tensor for specific type T
     #[inline]
     pub fn from_tensor(tensor: &'a TensorBase<S>) -> Self {
-        debug_assert_eq!(
-            tensor.dtype,
-            T::DTYPE,
-            "Type mismatch: tensor has dtype {:?}, but requested type has dtype {:?}",
-            tensor.dtype,
-            T::DTYPE
-        );
+        debug_assert_eq!(tensor.dtype, T::DTYPE);
 
-        let data_ptr = tensor.as_ptr() as *const T;
-        let numel = tensor.numel();
-        let end_ptr = unsafe { data_ptr.add(numel) };
+        let elem_size = std::mem::size_of::<T>();
+        let rank = tensor.rank();
         let is_contiguous = tensor.is_contiguous();
 
+        let (stride_bytes, cols, row_stride_bytes, col_stride_bytes) = if rank == 1 {
+            (tensor.strides[0] * elem_size, 0, 0, 0)
+        } else if rank == 2 {
+            (
+                0,
+                tensor.shape[1],
+                tensor.strides[0] * elem_size,
+                tensor.strides[1] * elem_size,
+            )
+        } else {
+            (0, 0, 0, 0)
+        };
+
         Self {
-            tensor,
-            ptr: data_ptr,
-            end_ptr,
-            cached_len: numel,
             current_index: 0,
-            tail_index: numel,
+            end_index: tensor.numel(),
+            base_ptr: tensor.storage.ptr().as_ptr(),
+            offset_bytes: tensor.offset_bytes,
+            stride_bytes,
+            cols,
+            row_stride_bytes,
+            col_stride_bytes,
+            tensor,
+            rank: rank as u8,
             is_contiguous,
             _phantom: PhantomData,
         }
     }
 
-    /// Get remaining length
     #[inline(always)]
     pub fn len(&self) -> usize {
-        if self.is_contiguous {
-            self.cached_len.saturating_sub(self.current_index)
-        } else {
-            ((self.end_ptr as usize - self.ptr as usize) / std::mem::size_of::<T>()).max(0)
-        }
+        self.end_index - self.current_index
     }
 
-    /// Check if empty
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
+        self.current_index >= self.end_index
+    }
+
+    /// Calculate offset for current index - mirrors at() logic
+    #[inline(always)]
+    pub(crate) fn calculate_offset(&self, index: usize) -> usize {
+        let elem_size = std::mem::size_of::<T>();
+
         if self.is_contiguous {
-            self.current_index >= self.cached_len
+            // Fastest: contiguous case - pure pointer arithmetic
+            self.offset_bytes + index * elem_size
+        } else if self.rank == 1 {
+            // 1D strided - single multiply
+            self.offset_bytes + index * self.stride_bytes
+        } else if self.rank == 2 {
+            // 2D:  row/col calculation
+            let row = index / self.cols;
+            let col = index % self.cols;
+            self.offset_bytes + row * self.row_stride_bytes + col * self.col_stride_bytes
         } else {
-            self.ptr >= self.end_ptr
+            // General N-D case - need tensor for shape/strides
+            let mut linear = index;
+            let mut offset = self.offset_bytes;
+            let rank = self.rank as usize;
+
+            for i in (0..rank).rev() {
+                let dim = self.tensor.shape[i];
+                let stride = self.tensor.strides[i] * elem_size;
+                let idx = linear % dim;
+                linear /= dim;
+                offset += idx * stride;
+            }
+            offset
         }
     }
 
-    /// Split the iterator at the given index
     #[inline]
     pub fn split_at(self, index: usize) -> (Self, Self) {
-        if self.is_contiguous {
-            let mid = self.current_index + index;
-            let mid = mid.min(self.cached_len);
+        let mid = (self.current_index + index).min(self.end_index);
 
-            let left = TensorTypeIter {
+        (
+            Self {
+                end_index: mid,
+                ..self
+            },
+            Self {
+                current_index: mid,
+                end_index: self.end_index,
+                base_ptr: self.base_ptr,
+                offset_bytes: self.offset_bytes,
+                stride_bytes: self.stride_bytes,
+                cols: self.cols,
+                row_stride_bytes: self.row_stride_bytes,
+                col_stride_bytes: self.col_stride_bytes,
                 tensor: self.tensor,
-                ptr: self.ptr,
-                end_ptr: self.ptr,
-                cached_len: mid - self.current_index,
-                current_index: 0,
-                tail_index: mid - self.current_index,
+                rank: self.rank,
                 is_contiguous: self.is_contiguous,
                 _phantom: PhantomData,
-            };
-
-            let right = TensorTypeIter {
-                tensor: self.tensor,
-                ptr: unsafe { self.ptr.add(mid - self.current_index) },
-                end_ptr: self.end_ptr,
-                cached_len: self.cached_len - mid,
-                current_index: 0,
-                tail_index: self.cached_len - mid,
-                is_contiguous: self.is_contiguous,
-                _phantom: PhantomData,
-            };
-
-            (left, right)
-        } else {
-            let mid_ptr = unsafe { self.ptr.add(index) };
-            let left = TensorTypeIter {
-                tensor: self.tensor,
-                ptr: self.ptr,
-                end_ptr: mid_ptr,
-                cached_len: index,
-                current_index: 0,
-                tail_index: index,
-                is_contiguous: self.is_contiguous,
-                _phantom: PhantomData,
-            };
-
-            let right = TensorTypeIter {
-                tensor: self.tensor,
-                ptr: mid_ptr,
-                end_ptr: self.end_ptr,
-                cached_len: self.cached_len - index,
-                current_index: 0,
-                tail_index: self.cached_len - index,
-                is_contiguous: self.is_contiguous,
-                _phantom: PhantomData,
-            };
-
-            (left, right)
-        }
+            },
+        )
     }
 }
 
-impl<'a, S: StorageTrait, T: TensorElement + 'a> Iterator for TensorTypeIter<'a, S, T> {
+impl<'a, S: StorageTrait, T: TensorElement> Iterator for TensorTypeIter<'a, S, T> {
     type Item = &'a T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.is_contiguous {
-            if self.current_index >= self.cached_len {
-                return None;
-            }
-            let current = self.ptr;
-            self.ptr = unsafe { self.ptr.add(1) };
+        if self.current_index < self.end_index {
+            // This mirrors exactly what for_at() does!
+            let offset = self.calculate_offset(self.current_index);
+            let ptr = unsafe { self.base_ptr.add(offset) as *const T };
             self.current_index += 1;
-            Some(unsafe { &*current })
+            Some(unsafe { &*ptr })
         } else {
-            if self.ptr >= self.end_ptr {
-                return None;
-            }
-            let current = self.ptr;
-            self.ptr = unsafe { self.ptr.add(1) };
-            Some(unsafe { &*current })
+            None
         }
     }
 
@@ -171,24 +162,13 @@ impl<'a, S: StorageTrait, T: TensorElement + 'a> Iterator for TensorTypeIter<'a,
 
     #[inline(always)]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if self.is_contiguous {
-            let p = unsafe { self.ptr.add(n) };
-            if p >= self.end_ptr {
-                return None;
-            }
-            self.ptr = unsafe { p.add(1) };
-            self.current_index += n + 1;
-            if self.current_index > self.tail_index {
-                self.tail_index = self.current_index;
-            }
-            Some(unsafe { &*p })
+        let new_index = self.current_index + n;
+        if new_index >= self.end_index {
+            self.current_index = self.end_index;
+            None
         } else {
-            let p = unsafe { self.ptr.add(n) };
-            if p >= self.end_ptr {
-                return None;
-            }
-            self.ptr = unsafe { p.add(1) };
-            Some(unsafe { &*p })
+            self.current_index = new_index;
+            self.next()
         }
     }
 }
@@ -196,24 +176,16 @@ impl<'a, S: StorageTrait, T: TensorElement + 'a> Iterator for TensorTypeIter<'a,
 impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for TensorTypeIter<'_, S, T> {}
 impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator for TensorTypeIter<'_, S, T> {}
 
-// Double-ended iteration support
 impl<S: StorageTrait, T: TensorElement> DoubleEndedIterator for TensorTypeIter<'_, S, T> {
+    #[inline(always)]
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.is_contiguous {
-            if self.current_index >= self.tail_index {
-                return None;
-            }
-            let idx = self.tail_index - 1;
-            let offset_bytes = idx * std::mem::size_of::<T>();
-            let p = unsafe { self.tensor.as_ptr().add(offset_bytes) as *const T };
-            self.tail_index = idx;
-            Some(unsafe { &*p })
+        if self.current_index < self.end_index {
+            self.end_index -= 1;
+            let offset = self.calculate_offset(self.end_index);
+            let ptr = unsafe { self.base_ptr.add(offset) as *const T };
+            Some(unsafe { &*ptr })
         } else {
-            if self.ptr >= self.end_ptr {
-                return None;
-            }
-            self.end_ptr = unsafe { self.end_ptr.sub(1) };
-            Some(unsafe { &*self.end_ptr })
+            None
         }
     }
 }
@@ -321,14 +293,6 @@ impl<S: StorageTrait> TensorBase<S> {
         TensorTypeMetaIter::from_tensor(self)
     }
 
-    /// Public: return indexed typed iterator, produce (indices, &T)
-    #[inline]
-    pub fn indexed_iter<T: TensorElement>(&self) -> IndexedTensorTypeIter<'_, S, T> {
-        IndexedTensorTypeIter {
-            inner: self.iter_with_meta::<T>(),
-        }
-    }
-
     /// Create a typed parallel iterator over all elements in the tensor
     #[cfg(feature = "rayon")]
     #[inline]
@@ -348,54 +312,27 @@ pub struct TensorTypeMetaItem<'a, T> {
     pub value: &'a T,
 }
 
-/// Typed iterator with metadata (indices and offset)
+/// Typed iterator with metadata - thin wrapper around TensorTypeIter
 pub struct TensorTypeMetaIter<'a, S: StorageTrait, T: TensorElement> {
-    tensor: &'a TensorBase<S>,
-    current_indices: ArrayUsize8,
-    linear_index: usize,
-    remaining: usize,
-    is_contiguous: bool,
-    element_size: usize,
-    strides_in_bytes: ArrayUsize8,
-    _marker: PhantomData<&'a T>,
+    /// The core iterator - handles all offset calculations
+    core: TensorTypeIter<'a, S, T>,
+    /// Shape reference for index calculation
+    shape: [usize; 8],
+    /// Current linear index (tracks separately for index calculation)
+    linear_idx: usize,
 }
 
 impl<'a, S: StorageTrait, T: TensorElement> TensorTypeMetaIter<'a, S, T> {
     #[inline]
     fn from_tensor(tensor: &'a TensorBase<S>) -> Self {
-        debug_assert_eq!(tensor.dtype, T::DTYPE);
-        let mut current_indices = ArrayUsize8::empty();
-        for _ in 0..tensor.rank() {
-            current_indices.push(0);
-        }
-        let element_size = std::mem::size_of::<T>();
-        let mut strides_in_bytes = ArrayUsize8::empty();
-        for i in 0..tensor.rank() {
-            strides_in_bytes.push(tensor.strides[i] * element_size);
-        }
-        Self {
-            tensor,
-            current_indices,
-            linear_index: 0,
-            remaining: tensor.numel(),
-            is_contiguous: tensor.is_contiguous(),
-            element_size,
-            strides_in_bytes,
-            _marker: PhantomData,
-        }
-    }
+        let mut shape = [0usize; 8];
+        let rank = tensor.rank();
+        shape[..rank].copy_from_slice(&tensor.shape.as_slice()[..rank]);
 
-    #[inline]
-    fn advance_indices(&mut self) {
-        if self.tensor.rank() == 0 {
-            return;
-        }
-        for i in (0..self.tensor.rank()).rev() {
-            self.current_indices[i] += 1;
-            if self.current_indices[i] < self.tensor.shape[i] {
-                return;
-            }
-            self.current_indices[i] = 0;
+        Self {
+            core: TensorTypeIter::from_tensor(tensor),
+            shape,
+            linear_idx: 0,
         }
     }
 }
@@ -403,36 +340,43 @@ impl<'a, S: StorageTrait, T: TensorElement> TensorTypeMetaIter<'a, S, T> {
 impl<'a, S: StorageTrait, T: TensorElement> Iterator for TensorTypeMetaIter<'a, S, T> {
     type Item = TensorTypeMetaItem<'a, T>;
 
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
+        if self.linear_idx >= self.core.end_index {
             return None;
         }
-        let offset = if self.is_contiguous {
-            self.linear_index * self.element_size
-        } else {
-            let mut off = 0usize;
-            for (dim_idx, &index) in self
-                .current_indices
-                .as_slice()
-                .iter()
-                .enumerate()
-                .take(self.tensor.rank())
-            {
-                if self.tensor.strides[dim_idx] != 0 {
-                    off += index * self.strides_in_bytes[dim_idx];
-                }
-            }
-            off
-        };
 
-        let ptr = unsafe { self.tensor.as_ptr().add(offset) as *const T };
+        // Reuse core's fast offset calculation
+        let offset = self.core.calculate_offset(self.linear_idx);
+        let ptr = unsafe { self.core.base_ptr.add(offset) as *const T };
         let value = unsafe { &*ptr };
 
-        let indices = self.current_indices;
-        self.remaining -= 1;
-        self.linear_index += 1;
-        self.advance_indices();
+        // Calculate multi-dimensional indices from linear index
+        let rank = self.core.rank;
+        let mut indices = ArrayUsize8::empty();
+
+        if rank == 1 {
+            indices.push(self.linear_idx);
+        } else if rank == 2 {
+            indices.push(self.linear_idx / self.shape[1]);
+            indices.push(self.linear_idx % self.shape[1]);
+        } else {
+            // General case for rank > 2
+            let mut idx = self.linear_idx;
+            let mut temp = [0usize; 8];
+            let rank_usize = rank as usize;
+
+            for i in (0..rank_usize).rev() {
+                temp[i] = idx % self.shape[i];
+                idx /= self.shape[i];
+            }
+
+            for &val in temp.iter().take(rank_usize) {
+                indices.push(val);
+            }
+        }
+
+        self.linear_idx += 1;
 
         Some(TensorTypeMetaItem {
             indices,
@@ -441,39 +385,15 @@ impl<'a, S: StorageTrait, T: TensorElement> Iterator for TensorTypeMetaIter<'a, 
         })
     }
 
-    #[inline]
+    #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
+        let remaining = self.core.end_index - self.linear_idx;
+        (remaining, Some(remaining))
     }
 }
 
 impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for TensorTypeMetaIter<'_, S, T> {}
 impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator for TensorTypeMetaIter<'_, S, T> {}
-
-/// Public indexed iterator adapter yielding (indices, &T)
-pub struct IndexedTensorTypeIter<'a, S: StorageTrait, T: TensorElement> {
-    inner: TensorTypeMetaIter<'a, S, T>,
-}
-
-impl<'a, S: StorageTrait, T: TensorElement> Iterator for IndexedTensorTypeIter<'a, S, T> {
-    type Item = (ArrayUsize8, &'a T);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|m| (m.indices, m.value))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<S: StorageTrait, T: TensorElement> ExactSizeIterator for IndexedTensorTypeIter<'_, S, T> {}
-impl<S: StorageTrait, T: TensorElement> std::iter::FusedIterator
-    for IndexedTensorTypeIter<'_, S, T>
-{
-}
 
 #[cfg(test)]
 mod tests {
@@ -585,19 +505,9 @@ mod tests {
     fn test_tensor_iter_non_contiguous() {
         // Create a 2x3 tensor: [[1, 2, 3], [4, 5, 6]]
         let tensor = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        println!("Original tensor shape: {:?}", tensor.dims());
 
         // Transpose to make it non-contiguous: [[1, 4], [2, 5], [3, 6]]
         let transposed = tensor.permute([1, 0]).unwrap();
-        println!("Transposed shape: {:?}", transposed.dims());
-        println!("Transposed strides: {:?}", transposed.strides());
-        println!("Is contiguous: {}", transposed.is_contiguous());
-
-        println!("\nIterating over transposed tensor:");
-        for (i, item) in transposed.iter_with_meta::<f32>().enumerate() {
-            let val = *item.value;
-            println!("Element {}: indices={:?}, value={}", i, item.indices, val);
-        }
 
         // Expected order for transposed tensor should be:
         // [0,0] -> 1.0, [0,1] -> 4.0, [1,0] -> 2.0, [1,1] -> 5.0, [2,0] -> 3.0, [2,1] -> 6.0
@@ -606,7 +516,6 @@ mod tests {
             .map(|item| *item.value)
             .collect();
 
-        println!("Actual values: {values:?}");
         assert_eq!(values, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     }
 
@@ -635,5 +544,129 @@ mod tests {
         assert_eq!(values.len(), 10);
         assert_eq!(values[0], 0.0);
         assert_eq!(values[9], 9.0);
+    }
+
+    #[test]
+    fn test_iter_permuted_2d_correctness() {
+        // Create a 2x3 tensor: [[1, 2, 3], [4, 5, 6]]
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, vec![2, 3]).unwrap();
+
+        // Transpose to 3x2: [[1, 4], [2, 5], [3, 6]]
+        let transposed = tensor.permute([1, 0]).unwrap();
+
+        // Test iteration order
+        let values: Vec<f32> = transposed.iter::<f32>().copied().collect();
+
+        // Expected: row-major order of transposed tensor
+        // [0,0]=1.0, [0,1]=4.0, [1,0]=2.0, [1,1]=5.0, [2,0]=3.0, [2,1]=6.0
+        assert_eq!(values, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
+
+    #[test]
+    fn test_iter_sliced_1d_correctness() {
+        use crate::s;
+
+        // Create 1D tensor: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        let data: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![10]).unwrap();
+
+        // Slice with step: [0, 2, 4, 6, 8]
+        let sliced = tensor.slice(s![0..10; 2]);
+
+        let values: Vec<f32> = sliced.iter::<f32>().copied().collect();
+        assert_eq!(values, vec![0.0, 2.0, 4.0, 6.0, 8.0]);
+    }
+
+    #[test]
+    fn test_iter_sliced_2d_correctness() {
+        use crate::s;
+
+        // Create 4x4 tensor:
+        // [[0,  1,  2,  3],
+        //  [4,  5,  6,  7],
+        //  [8,  9, 10, 11],
+        //  [12, 13, 14, 15]]
+        let data: Vec<f32> = (0..16).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![4, 4]).unwrap();
+
+        // Slice middle 2x2: [[5, 6], [9, 10]]
+        let sliced = tensor.slice(s![1..3, 1..3]);
+
+        let values: Vec<f32> = sliced.iter::<f32>().copied().collect();
+        assert_eq!(values, vec![5.0, 6.0, 9.0, 10.0]);
+    }
+
+    #[test]
+    fn test_iter_column_slice_correctness() {
+        use crate::s;
+
+        // Create 3x4 tensor:
+        // [[0,  1,  2,  3],
+        //  [4,  5,  6,  7],
+        //  [8,  9, 10, 11]]
+        let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![3, 4]).unwrap();
+
+        // Extract column 2: [2, 6, 10]
+        let col = tensor.slice(s![.., 2]);
+
+        let values: Vec<f32> = col.iter::<f32>().copied().collect();
+        assert_eq!(values, vec![2.0, 6.0, 10.0]);
+    }
+
+    #[test]
+    fn test_iter_3d_permuted_correctness() {
+        // Create 2x2x2 tensor
+        let data: Vec<f32> = (0..8).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![2, 2, 2]).unwrap();
+
+        // Permute dimensions: [2,2,2] -> [2,2,2] with different order
+        let permuted = tensor.permute([2, 0, 1]).unwrap();
+
+        // Get values via iter and via manual indexing
+        let iter_values: Vec<f32> = permuted.iter::<f32>().copied().collect();
+        let mut manual_values = Vec::new();
+        for i in 0..2 {
+            for j in 0..2 {
+                for k in 0..2 {
+                    manual_values.push(permuted.at::<f32>([i, j, k]));
+                }
+            }
+        }
+
+        assert_eq!(iter_values, manual_values);
+    }
+
+    #[test]
+    fn test_iter_vs_at_consistency() {
+        // Test that iter() produces same order as at() for all cases
+        let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![2, 3, 4]).unwrap();
+
+        // Test 1: Original tensor (contiguous)
+        let iter_vals: Vec<f32> = tensor.iter::<f32>().copied().collect();
+        let mut at_vals = Vec::new();
+        for i in 0..2 {
+            for j in 0..3 {
+                for k in 0..4 {
+                    at_vals.push(tensor.at::<f32>([i, j, k]));
+                }
+            }
+        }
+        assert_eq!(iter_vals, at_vals, "Contiguous: iter vs at mismatch");
+
+        // Test 2: Permuted tensor (non-contiguous)
+        let permuted = tensor.permute([1, 2, 0]).unwrap();
+        let iter_vals2: Vec<f32> = permuted.iter::<f32>().copied().collect();
+        let mut at_vals2 = Vec::new();
+        for i in 0..3 {
+            for j in 0..4 {
+                for k in 0..2 {
+                    at_vals2.push(permuted.at::<f32>([i, j, k]));
+                }
+            }
+        }
+        assert_eq!(iter_vals2, at_vals2, "Permuted: iter vs at mismatch");
     }
 }

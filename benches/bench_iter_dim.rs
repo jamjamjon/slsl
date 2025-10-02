@@ -12,7 +12,7 @@ fn generate_test_data_f32(size: usize) -> Vec<f32> {
 
 fn bench_iter_dim_1d_f32(c: &mut Criterion) {
     // Small, Medium, Large sizes
-    let sizes = [100, 500, 800, 1000, 4000, 6000, 8000, 10000];
+    let sizes = [100, 500, 1000, 4000, 6000, 8000, 10000];
 
     for size in sizes {
         let data = generate_test_data_f32(size);
@@ -129,14 +129,7 @@ fn bench_iter_dim_1d_f32(c: &mut Criterion) {
 
 fn bench_iter_dim_2d_f32(c: &mut Criterion) {
     // Small, Medium, Large sizes
-    let sizes = [
-        (50, 50),
-        (200, 200),
-        (400, 400),
-        (600, 600),
-        (800, 800),
-        (1000, 1000),
-    ];
+    let sizes = [(50, 50), (200, 200), (400, 400), (800, 800), (1000, 1000)];
 
     for (rows, cols) in sizes {
         let data = generate_test_data_f32(rows * cols);
@@ -271,12 +264,9 @@ fn bench_iter_dim_2d_f32(c: &mut Criterion) {
 fn bench_iter_dim_3d_f32(c: &mut Criterion) {
     // Small, Medium, Large sizes
     let sizes = [
-        (20, 20, 20),
         (60, 60, 60),
         (100, 100, 100),
-        (200, 200, 200),
         (400, 400, 400),
-        (600, 600, 600),
         (800, 800, 800),
     ];
 
@@ -566,14 +556,9 @@ fn bench_iter_dim_4d_f32(c: &mut Criterion) {
 // ==================== High-dimensional stress test ====================
 
 fn bench_iter_dim_6d_f32(c: &mut Criterion) {
-    // Small, Medium, Large sizes
     let sizes = [
-        (20, 20, 20, 20, 20, 20),
-        (40, 40, 40, 40, 40, 40),
-        (60, 60, 60, 60, 60, 60),
-        (80, 80, 80, 80, 80, 80),
-        (100, 100, 100, 100, 100, 100),
-        (200, 200, 200, 200, 200, 200),
+        (20, 20, 20, 20, 20, 20), // 64M elements = 256 MB
+        (1, 2, 60, 60, 60, 60),   // 25.9M elements = 103.7 MB
     ];
 
     for dims in sizes {
@@ -598,7 +583,6 @@ fn bench_iter_dim_6d_f32(c: &mut Criterion) {
             ArcArray::from_shape_vec((dims.0, dims.1, dims.2, dims.3, dims.4, dims.5), data)
                 .unwrap();
 
-        // Test: High-dimensional mathematical computation
         let mut group = c.benchmark_group(format!(
             "iter_dim_6d_f32_size_{}x{}x{}x{}x{}x{}_axis0_high_dim_math",
             dims.0, dims.1, dims.2, dims.3, dims.4, dims.5
@@ -609,7 +593,6 @@ fn bench_iter_dim_6d_f32(c: &mut Criterion) {
                 let mut result = 0.0f32;
                 for (idx, _slice_5d) in slsl_tensor.iter_dim(0).enumerate() {
                     let x = idx as f32;
-                    // Multi-step computation
                     let step1 = (x + 1.0).ln();
                     let step2 = step1.sin() + step1.cos();
                     let step3 = step2.abs().sqrt();

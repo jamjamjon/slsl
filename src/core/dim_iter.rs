@@ -210,7 +210,6 @@ impl<'a, S: StorageTrait> Iterator for DimIter<'a, S> {
         // Fast path: calculate offset directly without intermediate variables
         let offset_bytes = (current as isize - self.original_ptr as isize) as usize;
 
-        // Optimized TensorView construction with minimal overhead
         Some(unsafe {
             TensorView::from_raw_parts(
                 self.tensor.storage.as_storage(),
@@ -278,7 +277,6 @@ impl<'a, S: StorageTrait> Iterator for DimIter<'a, S> {
         self.next()
     }
 
-    /// Optimized last() implementation
     #[inline(always)]
     fn last(mut self) -> Option<Self::Item> {
         if self.cached_len == 0 {
