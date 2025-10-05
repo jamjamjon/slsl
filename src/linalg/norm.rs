@@ -24,8 +24,8 @@ impl<S: StorageTrait> TensorBase<S> {
     #[inline(always)]
     pub fn norm_keepdim<D: Dim>(&self, dim: D, ord: f32) -> Result<Tensor> {
         match ord {
-            1.0 => self.norm1_keepdim(dim),
-            2.0 => self.norm2_keepdim(dim),
+            1.0 => self.norm_l1_keepdim(dim),
+            2.0 => self.norm_l2_keepdim(dim),
             _ => anyhow::bail!("Invalid norm order: {}", ord),
         }
     }
@@ -38,7 +38,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
     /// Compute L1 norm (sum of absolute values) along the specified dimension, keeping dimensions
     #[inline(always)]
-    pub fn norm1_keepdim<D: Dim>(&self, dim: D) -> Result<Tensor> {
+    pub fn norm_l1_keepdim<D: Dim>(&self, dim: D) -> Result<Tensor> {
         self.abs()?.sum_keepdim(dim)
     }
 
@@ -56,7 +56,7 @@ impl<S: StorageTrait> TensorBase<S> {
 
     /// Compute L2 norm (Euclidean norm) along the specified dimension, keeping dimensions
     #[inline(always)]
-    pub fn norm2_keepdim<D: Dim>(&self, dim: D) -> Result<Tensor> {
+    pub fn norm_l2_keepdim<D: Dim>(&self, dim: D) -> Result<Tensor> {
         if !self.dtype.is_float() {
             anyhow::bail!(
                 "norm_l2 only supports floating-point types, got {:?}",
@@ -131,10 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn test_norm1_keepdim() -> Result<()> {
+    fn test_norm_l1_keepdim() -> Result<()> {
         let data = vec![3.0f32, -4.0];
         let tensor = Tensor::from_vec(data, [2])?;
-        let result = tensor.norm1_keepdim(0)?;
+        let result = tensor.norm_l1_keepdim(0)?;
 
         assert_eq!(result.dims(), &[1]);
         let expected = 7.0;
@@ -248,10 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn test_norm2_keepdim() -> Result<()> {
+    fn test_norm_l2_keepdim() -> Result<()> {
         let data = vec![3.0f32, 4.0];
         let tensor = Tensor::from_vec(data, [2])?;
-        let result = tensor.norm2_keepdim(0)?;
+        let result = tensor.norm_l2_keepdim(0)?;
 
         assert_eq!(result.dims(), &[1]);
         let expected = 5.0;

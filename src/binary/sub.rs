@@ -3,7 +3,8 @@ use half::{bf16, f16};
 
 use crate::{
     backend::{global_backend, r#impl::OpsTrait},
-    DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView, UninitVec,
+    compute_broadcast_shape, DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView,
+    UninitVec,
 };
 
 impl<S: StorageTrait> TensorBase<S> {
@@ -42,6 +43,49 @@ impl<S: StorageTrait> TensorBase<S> {
         } else {
             self.sub_non_contiguous(other)
         }
+    }
+
+    /// Subtract two tensors element-wise with broadcasting support
+    ///
+    /// If shapes don't match, attempts to broadcast them to a compatible shape.
+    #[inline(always)]
+    pub fn broadcast_sub<T: StorageTrait>(&self, other: &TensorBase<T>) -> Result<Tensor> {
+        // Check dtype compatibility
+        if self.dtype() != other.dtype() {
+            anyhow::bail!(
+                "Dtype mismatch for sub operation: {:?} vs {:?}",
+                self.dtype(),
+                other.dtype()
+            );
+        }
+
+        // Handle empty tensors
+        if self.numel() == 0 || other.numel() == 0 {
+            let empty_storage = crate::Storage::new(0, self.dtype().size_in_bytes())?;
+            return Ok(Tensor {
+                storage: empty_storage,
+                ptr: std::ptr::NonNull::dangling(),
+                dtype: self.dtype(),
+                shape: self.shape,
+                strides: Self::compute_contiguous_strides(self.shape()),
+                offset_bytes: 0,
+            });
+        }
+
+        // Check if shapes match exactly
+        if self.shape() == other.shape() {
+            return self.sub(other);
+        }
+
+        // Try to broadcast shapes
+        let broadcast_shape = compute_broadcast_shape(self.shape(), other.shape())?;
+
+        // Broadcast both tensors to the target shape
+        let self_broadcasted = self.broadcast_to(broadcast_shape)?;
+        let other_broadcasted = other.broadcast_to(broadcast_shape)?;
+
+        // Perform subtraction on broadcasted tensors
+        self_broadcasted.sub(&other_broadcasted)
     }
 
     /// Optimized subtraction for contiguous tensors using backend acceleration
@@ -537,28 +581,28 @@ impl<S: StorageTrait> TensorBase<S> {
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Sub<&TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn sub(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::sub(self, other).expect("Tensor subtraction failed")
+        TensorBase::broadcast_sub(self, other).expect("Tensor subtraction failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Sub<TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn sub(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::sub(self, &other).expect("Tensor subtraction failed")
+        TensorBase::broadcast_sub(self, &other).expect("Tensor subtraction failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Sub<&TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn sub(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::sub(&self, other).expect("Tensor subtraction failed")
+        TensorBase::broadcast_sub(&self, other).expect("Tensor subtraction failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Sub<TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn sub(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::sub(&self, &other).expect("Tensor subtraction failed")
+        TensorBase::broadcast_sub(&self, &other).expect("Tensor subtraction failed")
     }
 }
 
@@ -854,6 +898,56 @@ mod tests {
         assert_eq!(data[1], 0.0);
         assert_eq!(data[size - 1], (size - 2) as f32);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_sub_same_shape() -> Result<()> {
+        let a = Tensor::from_vec(vec![5.0f32, 6.0, 7.0, 8.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+
+        let result = a.broadcast_sub(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![4.0, 4.0, 4.0, 4.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_sub_scalar() -> Result<()> {
+        let a = Tensor::from_vec(vec![5.0f32, 6.0, 7.0, 8.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32], [1, 1])?;
+
+        let result = a.broadcast_sub(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![4.0, 5.0, 6.0, 7.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_sub_row_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![10.0f32, 20.0, 30.0, 40.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0], [1, 2])?;
+
+        let result = a.broadcast_sub(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![9.0, 18.0, 29.0, 38.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_sub_column_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![10.0f32, 20.0, 30.0, 40.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0], [2, 1])?;
+
+        let result = a.broadcast_sub(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![9.0, 19.0, 28.0, 38.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_sub_incompatible_shapes() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [3])?;
+
+        let result = a.broadcast_sub(&b);
+        assert!(result.is_err());
         Ok(())
     }
 }

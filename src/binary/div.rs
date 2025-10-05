@@ -3,10 +3,55 @@ use half::{bf16, f16};
 
 use crate::{
     backend::{global_backend, r#impl::OpsTrait},
-    DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView, UninitVec,
+    compute_broadcast_shape, DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView,
+    UninitVec,
 };
 
 impl<S: StorageTrait> TensorBase<S> {
+    /// Divide two tensors element-wise with broadcasting support
+    ///
+    /// If shapes don't match, attempts to broadcast them to a compatible shape.
+    /// For exact shape matching, use `div` for better performance.
+    #[inline(always)]
+    pub fn broadcast_div<T: StorageTrait>(&self, other: &TensorBase<T>) -> Result<Tensor> {
+        // Check dtype compatibility
+        if self.dtype() != other.dtype() {
+            anyhow::bail!(
+                "Dtype mismatch for div operation: {:?} vs {:?}",
+                self.dtype(),
+                other.dtype()
+            );
+        }
+
+        // Handle empty tensors
+        if self.numel() == 0 || other.numel() == 0 {
+            let empty_storage = crate::Storage::new(0, self.dtype().size_in_bytes())?;
+            return Ok(Tensor {
+                storage: empty_storage,
+                ptr: std::ptr::NonNull::dangling(),
+                dtype: self.dtype(),
+                shape: self.shape,
+                strides: Self::compute_contiguous_strides(self.shape()),
+                offset_bytes: 0,
+            });
+        }
+
+        // Check if shapes match exactly
+        if self.shape() == other.shape() {
+            return self.div(other);
+        }
+
+        // Try to broadcast shapes
+        let broadcast_shape = compute_broadcast_shape(self.shape(), other.shape())?;
+
+        // Broadcast both tensors to the target shape
+        let self_broadcasted = self.broadcast_to(broadcast_shape)?;
+        let other_broadcasted = other.broadcast_to(broadcast_shape)?;
+
+        // Perform division on broadcasted tensors
+        self_broadcasted.div(&other_broadcasted)
+    }
+
     /// Divide two tensors element-wise (shapes must match exactly)
     #[inline(always)]
     pub fn div<T: StorageTrait>(&self, other: &TensorBase<T>) -> Result<Tensor> {
@@ -47,6 +92,9 @@ impl<S: StorageTrait> TensorBase<S> {
             self.div_non_contiguous(other)
         }
     }
+
+    // Note: div_assign implementation removed due to complex type constraints
+    // Users can use: tensor = tensor / other; instead
 
     /// Optimized division for contiguous tensors using backend acceleration
     #[inline(always)]
@@ -272,28 +320,28 @@ impl<S: StorageTrait> TensorBase<S> {
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Div<&TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn div(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::div(self, other).expect("Tensor division failed")
+        TensorBase::broadcast_div(self, other).expect("Tensor division failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Div<TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn div(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::div(self, &other).expect("Tensor division failed")
+        TensorBase::broadcast_div(self, &other).expect("Tensor division failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Div<&TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn div(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::div(&self, other).expect("Tensor division failed")
+        TensorBase::broadcast_div(&self, other).expect("Tensor division failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Div<TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn div(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::div(&self, &other).expect("Tensor division failed")
+        TensorBase::broadcast_div(&self, &other).expect("Tensor division failed")
     }
 }
 
@@ -353,7 +401,7 @@ mod tests {
         let a = Tensor::from_vec(vec![10.0f32, 20.0, 30.0, 40.0], vec![2, 2])?;
         let b = Tensor::from_vec(vec![2.0f32, 4.0, 5.0, 8.0], vec![2, 2])?;
 
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<f32>()?;
         assert_eq!(data, &[5.0, 5.0, 6.0, 5.0]);
 
@@ -376,7 +424,7 @@ mod tests {
         // Test f64
         let a = Tensor::from_vec(vec![10.0f64, 20.0, 30.0, 40.0], vec![2, 2])?;
         let b = Tensor::from_vec(vec![2.0f64, 4.0, 5.0, 8.0], vec![2, 2])?;
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<f64>()?;
         assert_eq!(data, &[5.0, 5.0, 6.0, 5.0]);
 
@@ -388,7 +436,7 @@ mod tests {
         // Test f16
         let a = Tensor::from_vec(vec![f16::from_f32(10.0), f16::from_f32(20.0)], vec![2])?;
         let b = Tensor::from_vec(vec![f16::from_f32(2.0), f16::from_f32(4.0)], vec![2])?;
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<f16>()?;
         assert!((data[0].to_f32() - 5.0).abs() < 1e-3);
         assert!((data[1].to_f32() - 5.0).abs() < 1e-3);
@@ -396,7 +444,7 @@ mod tests {
         // Test bf16
         let a = Tensor::from_vec(vec![bf16::from_f32(10.0), bf16::from_f32(20.0)], vec![2])?;
         let b = Tensor::from_vec(vec![bf16::from_f32(2.0), bf16::from_f32(4.0)], vec![2])?;
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<bf16>()?;
         assert!((data[0].to_f32() - 5.0).abs() < 1e-2);
         assert!((data[1].to_f32() - 5.0).abs() < 1e-2);
@@ -409,7 +457,7 @@ mod tests {
         // Test same dtypes and shapes - should work fine
         let a = Tensor::from_vec(vec![8.0f32, 15.0], vec![2])?;
         let b = Tensor::from_vec(vec![2.0f32, 3.0], vec![2])?;
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<f32>()?;
         assert_eq!(data, &[4.0, 5.0]);
 
@@ -427,7 +475,7 @@ mod tests {
         let a = Tensor::from_vec(Vec::<f32>::new(), vec![0])?;
         let b = Tensor::from_vec(Vec::<f32>::new(), vec![0])?;
 
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         assert_eq!(result.numel(), 0);
         assert_eq!(result.dims(), &[0]);
 
@@ -461,7 +509,7 @@ mod tests {
         // Single element tensors
         let a = Tensor::from_vec(vec![15.0f32], vec![1])?;
         let b = Tensor::from_vec(vec![3.0f32], vec![1])?;
-        let result = a.div(&b)?;
+        let result = a.broadcast_div(&b)?;
         let data = result.as_slice::<f32>()?;
         assert_eq!(data, &[5.0]);
 
@@ -483,7 +531,7 @@ mod tests {
         let view2 = b.reshape(vec![3, 2])?;
 
         // Test division with views
-        let result = view1.div(&view2)?;
+        let result = view1.broadcast_div(&view2)?;
         let data = result.as_slice::<f32>()?;
         assert_eq!(data, &[5.0, 5.0, 6.0, 5.0, 5.0, 5.0]);
 
@@ -499,7 +547,7 @@ mod tests {
         let b = Tensor::from_vec((0..size).map(|i| (i + 2) as f32).collect(), vec![size])?;
 
         let start = Instant::now();
-        let _result = a.div(&b)?;
+        let _result = a.broadcast_div(&b)?;
         let elapsed = start.elapsed();
 
         println!("   Dividing {size} elements took: {elapsed:?}");
@@ -507,6 +555,55 @@ mod tests {
         // Should complete reasonably quickly
         assert!(elapsed.as_secs() < 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_div_same_shape() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![2.0f32, 1.0, 0.5, 2.0], [2, 2])?;
+        let result = a.broadcast_div(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![0.5, 2.0, 6.0, 2.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_div_scalar() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![2.0f32], [1, 1])?;
+        let result = a.broadcast_div(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![0.5, 1.0, 1.5, 2.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_div_row_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], [2, 3])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [1, 3])?;
+        let result = a.broadcast_div(&b)?;
+        assert_eq!(
+            result.to_flat_vec::<f32>()?,
+            vec![1.0, 1.0, 1.0, 4.0, 2.5, 2.0]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_div_column_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0], [2, 1])?;
+        let result = a.broadcast_div(&b)?;
+        // Expected: [[1.0, 2.0], [1.5, 2.0]] -> [1.0, 2.0, 1.5, 2.0]
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![1.0, 2.0, 1.5, 2.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_div_incompatible_shapes() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [3])?;
+        let result = a.broadcast_div(&b);
+        assert!(result.is_err());
         Ok(())
     }
 }

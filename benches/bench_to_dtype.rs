@@ -1,491 +1,121 @@
 use candle_core::{DType as CandleDType, Device, Tensor as CandleTensor};
-use criterion::{criterion_group, criterion_main, Criterion};
-use slsl::{s, Tensor};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use slsl::Tensor;
 use std::hint::black_box;
 
 // ========== Test Data Generation ==========
 
-fn generate_test_data_f32(size: usize) -> Vec<f32> {
+fn generate_f32(size: usize) -> Vec<f32> {
     (0..size).map(|i| (i % 1000) as f32 * 0.1).collect()
 }
 
-fn generate_test_data_i64(size: usize) -> Vec<i64> {
+fn generate_f64(size: usize) -> Vec<f64> {
+    generate_f32(size).iter().map(|&x| x as f64).collect()
+}
+
+fn generate_u8(size: usize) -> Vec<u8> {
+    (0..size).map(|i| (i % 256) as u8).collect()
+}
+
+fn generate_i64(size: usize) -> Vec<i64> {
     (0..size).map(|i| (i % 1000) as i64).collect()
 }
 
-// ========== 2D DType Conversion Benchmarks ==========
+// ========== Unified Benchmark Macro ==========
 
-fn bench_dtype_2d_f32_to_i64(c: &mut Criterion) {
-    let mut group = c.benchmark_group("dtype_2d_f32_to_i64");
-    let shape = [200, 200];
-    let numel = shape[0] * shape[1];
-    let data = generate_test_data_f32(numel);
+macro_rules! bench_conversion {
+    ($name:ident, $src_ty:ty, $dst_ty:ty, $gen_fn:ident, $candle_dst:expr) => {
+        fn $name(c: &mut Criterion) {
+            let sizes = vec![
+                ("tiny_16", vec![16, 16]),         // 256
+                ("small_64", vec![64, 64]),        // 4K
+                ("medium_256", vec![256, 256]),    // 64K
+                ("large_512", vec![512, 512]),     // 256K
+                ("xlarge_1024", vec![1024, 1024]), // 1M
+                ("3d_small", vec![32, 32, 8]),     // 8K
+                ("3d_medium", vec![64, 64, 16]),   // 64K
+            ];
 
-    // SLSL Tensor - Contiguous
-    let slsl_tensor_cont = Tensor::from_vec(data.clone(), shape).unwrap();
-    assert!(
-        slsl_tensor_cont.is_contiguous(),
-        "SLSL tensor should be contiguous"
-    );
-    assert_eq!(
-        slsl_tensor_cont.numel(),
-        numel,
-        "SLSL tensor numel mismatch"
-    );
+            let mut group = c.benchmark_group(stringify!($name));
 
-    // SLSL Tensor - Non-contiguous via permute
-    let slsl_tensor_nc = slsl_tensor_cont.clone().permute([1, 0]).unwrap();
-    assert!(
-        !slsl_tensor_nc.is_contiguous(),
-        "SLSL tensor should be non-contiguous"
-    );
-    assert_eq!(slsl_tensor_nc.numel(), numel, "SLSL tensor numel mismatch");
+            for (name, shape) in sizes {
+                let numel: usize = shape.iter().product();
+                let data = $gen_fn(numel);
 
-    // SLSL TensorView - Contiguous (slice of contiguous tensor)
-    let slsl_view_cont = slsl_tensor_cont.slice(s![.., ..]);
-    assert!(
-        slsl_view_cont.is_contiguous(),
-        "SLSL view should be contiguous"
-    );
-    assert_eq!(slsl_view_cont.numel(), numel, "SLSL view numel mismatch");
+                // SLSL tensors
+                let slsl_cont = Tensor::from_vec(data.clone(), shape.as_slice()).unwrap();
+                let slsl_nc = if shape.len() == 2 {
+                    slsl_cont.clone().permute([1, 0]).unwrap()
+                } else if shape.len() == 3 {
+                    slsl_cont.clone().permute([2, 0, 1]).unwrap()
+                } else {
+                    slsl_cont.clone()
+                };
 
-    // SLSL TensorView - Non-contiguous via slice
-    let slsl_view_nc = slsl_tensor_cont.slice(s![10..190, 10..190]);
-    assert!(
-        !slsl_view_nc.is_contiguous(),
-        "SLSL view should be non-contiguous"
-    );
-    let view_numel = 180 * 180;
-    assert_eq!(slsl_view_nc.numel(), view_numel, "SLSL view numel mismatch");
+                // Candle tensors
+                let device = Device::Cpu;
+                let candle_cont = match shape.len() {
+                    2 => CandleTensor::from_vec(data.clone(), &[shape[0], shape[1]], &device)
+                        .unwrap(),
+                    3 => CandleTensor::from_vec(
+                        data.clone(),
+                        &[shape[0], shape[1], shape[2]],
+                        &device,
+                    )
+                    .unwrap(),
+                    _ => panic!("Unsupported shape"),
+                };
+                let candle_nc = if shape.len() == 2 {
+                    candle_cont.permute((1, 0)).unwrap()
+                } else if shape.len() == 3 {
+                    candle_cont.permute((2, 0, 1)).unwrap()
+                } else {
+                    candle_cont.clone()
+                };
 
-    // Candle Tensor - Contiguous
-    let device = Device::Cpu;
-    let candle_tensor_cont =
-        CandleTensor::from_vec(data.clone(), &[shape[0], shape[1]], &device).unwrap();
-    assert!(
-        candle_tensor_cont.is_contiguous(),
-        "Candle tensor should be contiguous"
-    );
-    assert_eq!(
-        candle_tensor_cont.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
+                // Benchmarks
+                group.bench_with_input(BenchmarkId::new("slsl_cont", name), &slsl_cont, |b, t| {
+                    b.iter(|| black_box(t.to_dtype::<$dst_ty>().unwrap()))
+                });
 
-    // Candle Tensor - Non-contiguous via permute
-    let candle_tensor_nc = candle_tensor_cont.permute((1, 0)).unwrap();
-    assert!(
-        !candle_tensor_nc.is_contiguous(),
-        "Candle tensor should be non-contiguous"
-    );
-    assert_eq!(
-        candle_tensor_nc.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
+                group.bench_with_input(BenchmarkId::new("slsl_nc", name), &slsl_nc, |b, t| {
+                    b.iter(|| black_box(t.to_dtype::<$dst_ty>().unwrap()))
+                });
 
-    group.bench_function("slsl_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_cont.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
+                group.bench_with_input(
+                    BenchmarkId::new("candle_cont", name),
+                    &candle_cont,
+                    |b, t| b.iter(|| black_box(t.to_dtype($candle_dst).unwrap())),
+                );
 
-    group.bench_function("slsl_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_nc.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
+                group.bench_with_input(BenchmarkId::new("candle_nc", name), &candle_nc, |b, t| {
+                    b.iter(|| black_box(t.to_dtype($candle_dst).unwrap()))
+                });
+            }
 
-    group.bench_function("slsl_view_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_cont.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_nc.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_cont.to_dtype(CandleDType::I64).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_nc.to_dtype(CandleDType::I64).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.finish();
+            group.finish();
+        }
+    };
 }
 
-fn bench_dtype_2d_i64_to_f32(c: &mut Criterion) {
-    let mut group = c.benchmark_group("dtype_2d_i64_to_f32");
-    let shape = [200, 200];
-    let numel = shape[0] * shape[1];
-    let data = generate_test_data_i64(numel);
+// ========== Generate Benchmark Functions ==========
 
-    // SLSL Tensor - Contiguous
-    let slsl_tensor_cont = Tensor::from_vec(data.clone(), shape).unwrap();
-    assert!(
-        slsl_tensor_cont.is_contiguous(),
-        "SLSL tensor should be contiguous"
-    );
-    assert_eq!(
-        slsl_tensor_cont.numel(),
-        numel,
-        "SLSL tensor numel mismatch"
-    );
-
-    // SLSL Tensor - Non-contiguous via permute
-    let slsl_tensor_nc = slsl_tensor_cont.clone().permute([1, 0]).unwrap();
-    assert!(
-        !slsl_tensor_nc.is_contiguous(),
-        "SLSL tensor should be non-contiguous"
-    );
-    assert_eq!(slsl_tensor_nc.numel(), numel, "SLSL tensor numel mismatch");
-
-    // SLSL TensorView - Contiguous (slice of contiguous tensor)
-    let slsl_view_cont = slsl_tensor_cont.slice(s![.., ..]);
-    assert!(
-        slsl_view_cont.is_contiguous(),
-        "SLSL view should be contiguous"
-    );
-    assert_eq!(slsl_view_cont.numel(), numel, "SLSL view numel mismatch");
-
-    // SLSL TensorView - Non-contiguous via slice
-    let slsl_view_nc = slsl_tensor_cont.slice(s![10..190, 10..190]);
-    assert!(
-        !slsl_view_nc.is_contiguous(),
-        "SLSL view should be non-contiguous"
-    );
-    let view_numel = 180 * 180;
-    assert_eq!(slsl_view_nc.numel(), view_numel, "SLSL view numel mismatch");
-
-    // Candle Tensor - Contiguous
-    let device = Device::Cpu;
-    let candle_tensor_cont =
-        CandleTensor::from_vec(data.clone(), &[shape[0], shape[1]], &device).unwrap();
-    assert!(
-        candle_tensor_cont.is_contiguous(),
-        "Candle tensor should be contiguous"
-    );
-    assert_eq!(
-        candle_tensor_cont.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    // Candle Tensor - Non-contiguous via permute
-    let candle_tensor_nc = candle_tensor_cont.permute((1, 0)).unwrap();
-    assert!(
-        !candle_tensor_nc.is_contiguous(),
-        "Candle tensor should be non-contiguous"
-    );
-    assert_eq!(
-        candle_tensor_nc.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    group.bench_function("slsl_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_cont.to_dtype::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_nc.to_dtype::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_cont.to_dtype::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_nc.to_dtype::<f32>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_cont.to_dtype(CandleDType::F32).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_nc.to_dtype(CandleDType::F32).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
-
-// ========== 3D DType Conversion Benchmarks ==========
-
-fn bench_dtype_3d_f32_to_i64(c: &mut Criterion) {
-    let mut group = c.benchmark_group("dtype_3d_f32_to_i64");
-    let shape = [50, 40, 50];
-    let numel = shape[0] * shape[1] * shape[2];
-    let data = generate_test_data_f32(numel);
-
-    // SLSL Tensor - Contiguous
-    let slsl_tensor_cont = Tensor::from_vec(data.clone(), shape).unwrap();
-    assert!(
-        slsl_tensor_cont.is_contiguous(),
-        "SLSL tensor should be contiguous"
-    );
-    assert_eq!(
-        slsl_tensor_cont.numel(),
-        numel,
-        "SLSL tensor numel mismatch"
-    );
-
-    // SLSL Tensor - Non-contiguous via permute
-    let slsl_tensor_nc = slsl_tensor_cont.clone().permute([2, 0, 1]).unwrap();
-    assert!(
-        !slsl_tensor_nc.is_contiguous(),
-        "SLSL tensor should be non-contiguous"
-    );
-    assert_eq!(slsl_tensor_nc.numel(), numel, "SLSL tensor numel mismatch");
-
-    // SLSL TensorView - Contiguous (slice of contiguous tensor)
-    let slsl_view_cont = slsl_tensor_cont.slice(s![.., .., ..]);
-    assert!(
-        slsl_view_cont.is_contiguous(),
-        "SLSL view should be contiguous"
-    );
-    assert_eq!(slsl_view_cont.numel(), numel, "SLSL view numel mismatch");
-
-    // SLSL TensorView - Non-contiguous via slice
-    let slsl_view_nc = slsl_tensor_cont.slice(s![5..45, 5..35, 5..45]);
-    assert!(
-        !slsl_view_nc.is_contiguous(),
-        "SLSL view should be non-contiguous"
-    );
-    let view_numel = 40 * 30 * 40;
-    assert_eq!(slsl_view_nc.numel(), view_numel, "SLSL view numel mismatch");
-
-    // Candle Tensor - Contiguous
-    let device = Device::Cpu;
-    let candle_tensor_cont =
-        CandleTensor::from_vec(data.clone(), &[shape[0], shape[1], shape[2]], &device).unwrap();
-    assert!(
-        candle_tensor_cont.is_contiguous(),
-        "Candle tensor should be contiguous"
-    );
-    assert_eq!(
-        candle_tensor_cont.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    // Candle Tensor - Non-contiguous via permute
-    let candle_tensor_nc = candle_tensor_cont.permute((2, 0, 1)).unwrap();
-    assert!(
-        !candle_tensor_nc.is_contiguous(),
-        "Candle tensor should be non-contiguous"
-    );
-    assert_eq!(
-        candle_tensor_nc.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    group.bench_function("slsl_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_cont.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_nc.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_cont.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_nc.to_dtype::<i64>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_cont.to_dtype(CandleDType::I64).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_nc.to_dtype(CandleDType::I64).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
-
-// ========== 4D DType Conversion Benchmarks ==========
-
-fn bench_dtype_4d_f32_to_u8(c: &mut Criterion) {
-    let mut group = c.benchmark_group("dtype_4d_f32_to_u8");
-    let shape = [20, 15, 10, 12];
-    let numel = shape[0] * shape[1] * shape[2] * shape[3];
-    let data = generate_test_data_f32(numel);
-
-    // SLSL Tensor - Contiguous
-    let slsl_tensor_cont = Tensor::from_vec(data.clone(), shape).unwrap();
-    assert!(
-        slsl_tensor_cont.is_contiguous(),
-        "SLSL tensor should be contiguous"
-    );
-    assert_eq!(
-        slsl_tensor_cont.numel(),
-        numel,
-        "SLSL tensor numel mismatch"
-    );
-
-    // SLSL Tensor - Non-contiguous via permute
-    let slsl_tensor_nc = slsl_tensor_cont.clone().permute([3, 1, 0, 2]).unwrap();
-    assert!(
-        !slsl_tensor_nc.is_contiguous(),
-        "SLSL tensor should be non-contiguous"
-    );
-    assert_eq!(slsl_tensor_nc.numel(), numel, "SLSL tensor numel mismatch");
-
-    // SLSL TensorView - Contiguous (slice of contiguous tensor)
-    let slsl_view_cont = slsl_tensor_cont.slice(s![.., .., .., ..]);
-    assert!(
-        slsl_view_cont.is_contiguous(),
-        "SLSL view should be contiguous"
-    );
-    assert_eq!(slsl_view_cont.numel(), numel, "SLSL view numel mismatch");
-
-    // SLSL TensorView - Non-contiguous via slice
-    let slsl_view_nc = slsl_tensor_cont.slice(s![2..18, 2..13, 1..9, 1..11]);
-    assert!(
-        !slsl_view_nc.is_contiguous(),
-        "SLSL view should be non-contiguous"
-    );
-    let view_numel = 16 * 11 * 8 * 10;
-    assert_eq!(slsl_view_nc.numel(), view_numel, "SLSL view numel mismatch");
-
-    // Candle Tensor - Contiguous
-    let device = Device::Cpu;
-    let candle_tensor_cont = CandleTensor::from_vec(
-        data.clone(),
-        &[shape[0], shape[1], shape[2], shape[3]],
-        &device,
-    )
-    .unwrap();
-    assert!(
-        candle_tensor_cont.is_contiguous(),
-        "Candle tensor should be contiguous"
-    );
-    assert_eq!(
-        candle_tensor_cont.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    // Candle Tensor - Non-contiguous via permute
-    let candle_tensor_nc = candle_tensor_cont.permute((3, 1, 0, 2)).unwrap();
-    assert!(
-        !candle_tensor_nc.is_contiguous(),
-        "Candle tensor should be non-contiguous"
-    );
-    assert_eq!(
-        candle_tensor_nc.elem_count(),
-        numel,
-        "Candle tensor numel mismatch"
-    );
-
-    group.bench_function("slsl_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_cont.to_dtype::<u8>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_tensor_nc.to_dtype::<u8>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_cont.to_dtype::<u8>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("slsl_view_non_contiguous", |b| {
-        b.iter(|| {
-            let result = slsl_view_nc.to_dtype::<u8>().unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_cont.to_dtype(CandleDType::U8).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.bench_function("candle_tensor_non_contiguous", |b| {
-        b.iter(|| {
-            let result = candle_tensor_nc.to_dtype(CandleDType::U8).unwrap();
-            black_box(result)
-        })
-    });
-
-    group.finish();
-}
+bench_conversion!(bench_f32_to_f64, f32, f64, generate_f32, CandleDType::F64);
+bench_conversion!(bench_f64_to_f32, f64, f32, generate_f64, CandleDType::F32);
+bench_conversion!(bench_f32_to_u8, f32, u8, generate_f32, CandleDType::U8);
+bench_conversion!(bench_u8_to_f32, u8, f32, generate_u8, CandleDType::F32);
+bench_conversion!(bench_f32_to_i64, f32, i64, generate_f32, CandleDType::I64);
+bench_conversion!(bench_i64_to_f32, i64, f32, generate_i64, CandleDType::F32);
 
 // ========== Benchmark Group Registration ==========
 
 criterion_group!(
     benches,
-    bench_dtype_2d_f32_to_i64,
-    bench_dtype_2d_i64_to_f32,
-    bench_dtype_3d_f32_to_i64,
-    bench_dtype_4d_f32_to_u8
+    bench_f32_to_f64,
+    bench_f64_to_f32,
+    bench_f32_to_u8,
+    bench_u8_to_f32,
+    bench_f32_to_i64,
+    bench_i64_to_f32
 );
 criterion_main!(benches);

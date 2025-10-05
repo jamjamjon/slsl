@@ -40,12 +40,9 @@ impl<S: StorageTrait> TensorBase<S> {
         }
 
         Ok(TensorBase {
-            storage: self.storage,
-            ptr: self.ptr,
-            dtype: self.dtype,
             shape: new_shape,
             strides: new_strides,
-            offset_bytes: self.offset_bytes,
+            ..self
         })
     }
 
@@ -105,6 +102,43 @@ impl<S: StorageTrait> TensorBase<S> {
                 self.permute(flipped_dims)
             }
         }
+    }
+
+    /// Transpose a 2D tensor by swapping its dimensions.
+    ///
+    /// This is equivalent to `permute([1, 0])` for 2D tensors.
+    /// The operation is zero-copy and only modifies the shape and strides.
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - A 2D tensor to transpose
+    ///
+    /// # Returns
+    ///
+    /// Returns a new tensor with swapped dimensions, or an error if the tensor is not 2D.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use slsl::Tensor;
+    ///
+    /// let tensor = Tensor::from_vec(vec![1, 2, 3, 4, 5, 6], [2, 3]).unwrap();
+    /// let transposed = tensor.t().unwrap();
+    /// assert_eq!(transposed.dims(), [3, 2]);
+    /// ```
+    pub fn t(self) -> Result<TensorBase<S>> {
+        if self.rank() != 2 {
+            anyhow::bail!(
+                "Transpose operation 't()' is only supported for 2D tensors, got {}D",
+                self.rank()
+            );
+        }
+
+        Ok(TensorBase {
+            shape: Shape::from([self.shape[1], self.shape[0]]),
+            strides: Shape::from([self.strides[1], self.strides[0]]),
+            ..self
+        })
     }
 }
 

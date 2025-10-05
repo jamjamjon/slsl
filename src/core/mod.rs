@@ -9,6 +9,7 @@ mod shape;
 mod storage;
 mod tensor_elem;
 mod tensorbase;
+mod to_dtype;
 mod to_vec;
 mod uninit_vec;
 

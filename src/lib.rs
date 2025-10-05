@@ -8,6 +8,7 @@ mod slice;
 mod unary;
 
 pub use backend::*;
+pub use binary::*;
 pub use core::*;
 pub use reduce::*;
 pub use slice::{elem::*, IntoSliceElem};

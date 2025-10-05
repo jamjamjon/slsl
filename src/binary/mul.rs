@@ -3,11 +3,12 @@ use half::{bf16, f16};
 
 use crate::{
     backend::{global_backend, r#impl::OpsTrait},
-    DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView, UninitVec,
+    compute_broadcast_shape, DType, StorageTrait, Tensor, TensorBase, TensorElement, TensorView,
+    UninitVec,
 };
 
 impl<S: StorageTrait> TensorBase<S> {
-    /// Multiply two tensors element-wise
+    /// Multiply two tensors element-wise (shapes must match exactly)
     #[inline(always)]
     pub fn mul<T: StorageTrait>(&self, other: &TensorBase<T>) -> Result<Tensor> {
         // Check shape compatibility
@@ -46,6 +47,49 @@ impl<S: StorageTrait> TensorBase<S> {
         } else {
             self.mul_non_contiguous(other)
         }
+    }
+
+    /// Multiply two tensors element-wise with broadcasting support
+    ///
+    /// If shapes don't match, attempts to broadcast them to a compatible shape.
+    #[inline(always)]
+    pub fn broadcast_mul<T: StorageTrait>(&self, other: &TensorBase<T>) -> Result<Tensor> {
+        // Check dtype compatibility
+        if self.dtype() != other.dtype() {
+            anyhow::bail!(
+                "Dtype mismatch for mul operation: {:?} vs {:?}",
+                self.dtype(),
+                other.dtype()
+            );
+        }
+
+        // Handle empty tensors
+        if self.numel() == 0 || other.numel() == 0 {
+            let empty_storage = crate::Storage::new(0, self.dtype().size_in_bytes())?;
+            return Ok(Tensor {
+                storage: empty_storage,
+                ptr: std::ptr::NonNull::dangling(),
+                dtype: self.dtype(),
+                shape: self.shape,
+                strides: Self::compute_contiguous_strides(self.shape()),
+                offset_bytes: 0,
+            });
+        }
+
+        // Check if shapes match exactly
+        if self.shape() == other.shape() {
+            return self.mul(other);
+        }
+
+        // Try to broadcast shapes
+        let broadcast_shape = compute_broadcast_shape(self.shape(), other.shape())?;
+
+        // Broadcast both tensors to the target shape
+        let self_broadcasted = self.broadcast_to(broadcast_shape)?;
+        let other_broadcasted = other.broadcast_to(broadcast_shape)?;
+
+        // Perform multiplication on broadcasted tensors
+        self_broadcasted.mul(&other_broadcasted)
     }
 
     /// Optimized multiplication for contiguous tensors using backend acceleration
@@ -528,28 +572,28 @@ impl<S: StorageTrait> TensorBase<S> {
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Mul<&TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn mul(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::mul(self, other).expect("Tensor multiplication failed")
+        TensorBase::broadcast_mul(self, other).expect("Tensor multiplication failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Mul<TensorBase<S2>> for &TensorBase<S1> {
     type Output = Tensor;
     fn mul(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::mul(self, &other).expect("Tensor multiplication failed")
+        TensorBase::broadcast_mul(self, &other).expect("Tensor multiplication failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Mul<&TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn mul(self, other: &TensorBase<S2>) -> Self::Output {
-        TensorBase::mul(&self, other).expect("Tensor multiplication failed")
+        TensorBase::broadcast_mul(&self, other).expect("Tensor multiplication failed")
     }
 }
 
 impl<S1: StorageTrait, S2: StorageTrait> std::ops::Mul<TensorBase<S2>> for TensorBase<S1> {
     type Output = Tensor;
     fn mul(self, other: TensorBase<S2>) -> Self::Output {
-        TensorBase::mul(&self, &other).expect("Tensor multiplication failed")
+        TensorBase::broadcast_mul(&self, &other).expect("Tensor multiplication failed")
     }
 }
 
@@ -777,6 +821,56 @@ mod tests {
         // Should complete reasonably quickly
         assert!(elapsed.as_secs() < 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_mul_same_shape() -> Result<()> {
+        let a = Tensor::from_vec(vec![2.0f32, 3.0, 4.0, 5.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+
+        let result = a.broadcast_mul(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![2.0, 6.0, 12.0, 20.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_mul_scalar() -> Result<()> {
+        let a = Tensor::from_vec(vec![2.0f32, 3.0, 4.0, 5.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![2.0f32], [1, 1])?;
+
+        let result = a.broadcast_mul(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![4.0, 6.0, 8.0, 10.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_mul_row_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![2.0f32, 3.0, 4.0, 5.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![2.0f32, 3.0], [1, 2])?;
+
+        let result = a.broadcast_mul(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![4.0, 9.0, 8.0, 15.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_mul_column_vector() -> Result<()> {
+        let a = Tensor::from_vec(vec![2.0f32, 3.0, 4.0, 5.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![2.0f32, 3.0], [2, 1])?;
+
+        let result = a.broadcast_mul(&b)?;
+        assert_eq!(result.to_flat_vec::<f32>()?, vec![4.0, 6.0, 12.0, 15.0]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_broadcast_mul_incompatible_shapes() -> Result<()> {
+        let a = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2])?;
+        let b = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [3])?;
+
+        let result = a.broadcast_mul(&b);
+        assert!(result.is_err());
         Ok(())
     }
 }
