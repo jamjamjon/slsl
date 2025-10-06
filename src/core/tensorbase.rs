@@ -1441,6 +1441,215 @@ impl<S: StorageTrait> TensorBase<S> {
 
         Tensor::from_vec(output, self.shape)
     }
+
+    /// Parallel version of map() that applies a closure to each element using Rayon
+    ///
+    /// This method provides parallel processing for large tensors where the overhead
+    /// of parallelization is justified by the computation complexity.
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element and returns a new value
+    ///
+    /// # Returns
+    /// * `Result<Tensor>` - New tensor with mapped values
+    ///
+    /// # Examples
+    /// ```rust
+    /// use slsl::Tensor;
+    ///
+    /// let tensor = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2]).unwrap();
+    /// let result = tensor.par_map::<f32>(|x| x * 2.0).unwrap();
+    /// ```
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    pub fn par_map<T>(&self, f: impl Fn(&T) -> T + Send + Sync) -> Result<Tensor>
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        if self.is_contiguous() {
+            self.par_map_contiguous::<T>(f)
+        } else {
+            self.par_map_non_contiguous::<T>(f)
+        }
+    }
+
+    /// Parallel version of map_contiguous() using Rayon
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element and returns a new value
+    ///
+    /// # Returns
+    /// * `Result<Tensor>` - New tensor with mapped values
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    pub fn par_map_contiguous<T>(&self, f: impl Fn(&T) -> T + Send + Sync) -> Result<Tensor>
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        use rayon::prelude::*;
+
+        let input_data = self.as_slice::<T>()?;
+        let output: Vec<T> = input_data.par_iter().map(f).collect();
+        Tensor::from_vec(output, self.shape)
+    }
+
+    /// Parallel version of map_non_contiguous() using Rayon
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element and returns a new value
+    ///
+    /// # Returns
+    /// * `Result<Tensor>` - New tensor with mapped values
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    pub fn par_map_non_contiguous<T>(&self, f: impl Fn(&T) -> T + Send + Sync) -> Result<Tensor>
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        use rayon::prelude::*;
+
+        let output: Vec<T> = self.par_iter::<T>().map(f).collect();
+
+        Tensor::from_vec(output, self.shape)
+    }
+
+    /// Applies a closure to each element of the tensor for side effects.
+    ///
+    /// This method iterates through all elements of the tensor and applies
+    /// the given closure to each element. Unlike `map()`, this method does
+    /// not return a new tensor but is used for side effects like printing,
+    /// counting, or validation.
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    ///
+    /// # Examples
+    /// ```rust
+    /// use slsl::Tensor;
+    ///
+    /// let tensor = Tensor::from_vec(vec![1.0f32, 2.0, 3.0], [3]).unwrap();
+    ///
+    /// // Count positive values
+    /// let mut count = 0;
+    /// tensor.for_each::<f32>(|x| {
+    ///     if *x > 0.0 { count += 1; }
+    /// });
+    /// assert_eq!(count, 3);
+    /// ```
+    #[inline(always)]
+    pub fn for_each<T>(&self, f: impl FnMut(&T))
+    where
+        T: Copy + 'static + TensorElement,
+    {
+        if self.is_contiguous() {
+            self.for_each_contiguous::<T>(f)
+        } else {
+            self.for_each_non_contiguous::<T>(f)
+        }
+    }
+
+    /// Applies a closure to each element of a contiguous tensor for side effects.
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    #[inline(always)]
+    fn for_each_contiguous<T>(&self, mut f: impl FnMut(&T))
+    where
+        T: Copy + 'static + TensorElement,
+    {
+        if let Ok(data) = self.as_slice::<T>() {
+            data.iter().for_each(&mut f);
+        }
+    }
+
+    /// Applies a closure to each element of a non-contiguous tensor for side effects.
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    #[inline(always)]
+    fn for_each_non_contiguous<T>(&self, mut f: impl FnMut(&T))
+    where
+        T: Copy + 'static + TensorElement,
+    {
+        self.iter::<T>().for_each(&mut f);
+    }
+
+    /// Parallel version of for_each() that applies a closure to each element using Rayon
+    ///
+    /// This method provides parallel processing for side effects on large tensors.
+    /// The closure is applied to each element in parallel, which can be significantly
+    /// faster for CPU-intensive operations.
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    ///
+    /// # Examples
+    /// ```rust
+    /// use slsl::Tensor;
+    /// use std::sync::atomic::{AtomicUsize, Ordering};
+    ///
+    /// let tensor = Tensor::from_vec(vec![1.0f32, 2.0, 3.0, 4.0], [2, 2]).unwrap();
+    ///
+    /// // Count values greater than 2.0 in parallel
+    /// let counter = std::sync::Arc::new(AtomicUsize::new(0));
+    /// let counter_clone = counter.clone();
+    /// tensor.par_for_each::<f32>(move |x| {
+    ///     if *x > 2.0 {
+    ///         counter_clone.fetch_add(1, Ordering::Relaxed);
+    ///     }
+    /// });
+    /// assert_eq!(counter.load(Ordering::Relaxed), 2);
+    /// ```
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    pub fn par_for_each<T>(&self, f: impl Fn(&T) + Send + Sync)
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        if self.is_contiguous() {
+            self.par_for_each_contiguous::<T>(f)
+        } else {
+            self.par_for_each_non_contiguous::<T>(f)
+        }
+    }
+
+    /// Parallel version of for_each_contiguous() using Rayon
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    fn par_for_each_contiguous<T>(&self, f: impl Fn(&T) + Send + Sync)
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        use rayon::prelude::*;
+
+        if let Ok(data) = self.as_slice::<T>() {
+            data.par_iter().for_each(f);
+        }
+    }
+
+    /// Parallel version of for_each_non_contiguous() using Rayon
+    ///
+    /// # Arguments
+    /// * `f` - Closure that takes a reference to an element
+    #[cfg(feature = "rayon")]
+    #[inline(always)]
+    fn par_for_each_non_contiguous<T>(&self, f: impl Fn(&T) + Send + Sync)
+    where
+        T: Copy + 'static + TensorElement + Send + Sync,
+        S: Send + Sync,
+    {
+        use rayon::prelude::*;
+
+        self.par_iter::<T>().for_each(f);
+    }
 }
 
 #[cfg(test)]
@@ -1504,5 +1713,528 @@ mod tests {
         assert_eq!(tensor.dtype(), owned.dtype());
         assert_eq!(tensor.numel(), owned.numel());
         assert_eq!(owned.numel(), 0);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_contiguous() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+
+        let result = tensor.par_map::<f32>(|x| x * 2.0).unwrap();
+
+        assert_eq!(result.shape(), tensor.shape());
+        assert_eq!(result.dtype(), tensor.dtype());
+
+        let result_data = result.as_slice::<f32>().unwrap();
+        assert_eq!(result_data, &[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_non_contiguous() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+
+        // Create a non-contiguous view by transposing
+        let transposed = tensor.permute([1, 0]).unwrap();
+        assert!(!transposed.is_contiguous());
+
+        let result = transposed.par_map::<f32>(|x| x * 3.0).unwrap();
+
+        assert_eq!(result.shape(), transposed.shape());
+        assert_eq!(result.dtype(), transposed.dtype());
+
+        // The result should be contiguous after mapping
+        assert!(result.is_contiguous());
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_vs_map_consistency() {
+        let data: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, [10, 100]).unwrap();
+
+        // Test with contiguous tensor
+        let map_result = tensor.map::<f32>(|x| x.sin()).unwrap();
+        let par_map_result = tensor.par_map::<f32>(|x| x.sin()).unwrap();
+
+        assert_eq!(map_result.shape(), par_map_result.shape());
+        assert_eq!(map_result.dtype(), par_map_result.dtype());
+
+        let map_data = map_result.as_slice::<f32>().unwrap();
+        let par_map_data = par_map_result.as_slice::<f32>().unwrap();
+
+        // Results should be identical (within floating point precision)
+        for (a, b) in map_data.iter().zip(par_map_data.iter()) {
+            assert!((a - b).abs() < 1e-6, "Results differ: {} vs {}", a, b);
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_different_types() {
+        // Test with i32
+        let data_i32 = vec![1i32, -2, 3, -4, 5];
+        let tensor_i32 = Tensor::from_vec(data_i32, [5]).unwrap();
+        let result_i32 = tensor_i32.par_map::<i32>(|x| x.abs()).unwrap();
+        let result_data_i32 = result_i32.as_slice::<i32>().unwrap();
+        assert_eq!(result_data_i32, &[1, 2, 3, 4, 5]);
+
+        // Test with f64
+        let data_f64 = vec![1.0f64, 2.0, 3.0];
+        let tensor_f64 = Tensor::from_vec(data_f64, [3]).unwrap();
+        let result_f64 = tensor_f64.par_map::<f64>(|x| x.sqrt()).unwrap();
+        let result_data_f64 = result_f64.as_slice::<f64>().unwrap();
+        assert_eq!(
+            result_data_f64,
+            &[1.0, std::f64::consts::SQRT_2, 1.7320508075688772]
+        );
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_empty_tensor() {
+        let tensor = Tensor::from_vec(vec![0u8; 0], [0]).unwrap();
+        let result = tensor.par_map::<u8>(|x| x + 1).unwrap();
+
+        assert_eq!(result.shape(), tensor.shape());
+        assert_eq!(result.dtype(), tensor.dtype());
+        assert_eq!(result.numel(), 0);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_comprehensive_contiguous() {
+        // Test 1D contiguous tensor
+        let data_1d = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let tensor_1d = Tensor::from_vec(data_1d, [5]).unwrap();
+        assert!(tensor_1d.is_contiguous());
+
+        let result_1d = tensor_1d.par_map::<f32>(|x| x * 2.0).unwrap();
+        let expected_1d = vec![2.0f32, 4.0, 6.0, 8.0, 10.0];
+        assert_eq!(result_1d.as_slice::<f32>().unwrap(), &expected_1d);
+
+        // Test 2D contiguous tensor
+        let data_2d = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor_2d = Tensor::from_vec(data_2d, [2, 3]).unwrap();
+        assert!(tensor_2d.is_contiguous());
+
+        let result_2d = tensor_2d.par_map::<f32>(|x| x + 1.0).unwrap();
+        let expected_2d = vec![2.0f32, 3.0, 4.0, 5.0, 6.0, 7.0];
+        assert_eq!(result_2d.as_slice::<f32>().unwrap(), &expected_2d);
+
+        // Test 3D contiguous tensor
+        let data_3d: Vec<f32> = (0..24).map(|i| i as f32).collect();
+        let tensor_3d = Tensor::from_vec(data_3d, [2, 3, 4]).unwrap();
+        assert!(tensor_3d.is_contiguous());
+
+        let result_3d = tensor_3d.par_map::<f32>(|x| x.sqrt()).unwrap();
+        let expected_3d: Vec<f32> = (0..24).map(|i| (i as f32).sqrt()).collect();
+        let result_slice = result_3d.as_slice::<f32>().unwrap();
+
+        for (i, (actual, expected)) in result_slice.iter().zip(expected_3d.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "Mismatch at index {}: actual={}, expected={}",
+                i,
+                actual,
+                expected
+            );
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_comprehensive_non_contiguous() {
+        // Test 1: Transposed 2D tensor
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let original = Tensor::from_vec(data, [2, 3]).unwrap();
+        let transposed = original.permute([1, 0]).unwrap();
+        assert!(!transposed.is_contiguous());
+
+        // Verify the transposed data layout
+        // Original: [[1, 2, 3], [4, 5, 6]]
+        // Transposed: [[1, 4], [2, 5], [3, 6]]
+        let result = transposed.par_map::<f32>(|x| x * 2.0).unwrap();
+        assert!(result.is_contiguous()); // Result should be contiguous
+
+        // The result should be [2.0, 8.0, 4.0, 10.0, 6.0, 12.0] in contiguous layout
+        let result_slice = result.as_slice::<f32>().unwrap();
+        let expected = vec![2.0f32, 8.0, 4.0, 10.0, 6.0, 12.0];
+        assert_eq!(result_slice, &expected);
+
+        // Test 2: Sliced tensor (if slice operation exists)
+        // For now, let's test with a different permutation
+        let data_3d: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let tensor_3d = Tensor::from_vec(data_3d, [2, 2, 3]).unwrap();
+        let permuted = tensor_3d.permute([2, 0, 1]).unwrap();
+        assert!(!permuted.is_contiguous());
+
+        let result_3d = permuted.par_map::<f32>(|x| x + 10.0).unwrap();
+        assert!(result_3d.is_contiguous());
+
+        // Verify the result has the correct shape and values
+        assert_eq!(result_3d.shape(), permuted.shape());
+        assert_eq!(result_3d.dtype(), permuted.dtype());
+
+        // Test 3: Complex non-contiguous layout
+        let data_4d: Vec<f32> = (0..16).map(|i| i as f32).collect();
+        let tensor_4d = Tensor::from_vec(data_4d, [2, 2, 2, 2]).unwrap();
+        let complex_permuted = tensor_4d.permute([3, 1, 0, 2]).unwrap();
+        assert!(!complex_permuted.is_contiguous());
+
+        let result_4d = complex_permuted.par_map::<f32>(|x| x * x).unwrap();
+        assert!(result_4d.is_contiguous());
+        assert_eq!(result_4d.shape(), complex_permuted.shape());
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_vs_map_consistency_detailed() {
+        // Test 1D tensor
+        let data_1d: Vec<f32> = (0..10).map(|i| (i as f32) * 0.1).collect();
+        let tensor_1d = Tensor::from_vec(data_1d, [10]).unwrap();
+
+        let map_result_1d = tensor_1d.map::<f32>(|x| x * 2.0).unwrap();
+        let par_map_result_1d = tensor_1d.par_map::<f32>(|x| x * 2.0).unwrap();
+
+        assert_eq!(map_result_1d.shape(), par_map_result_1d.shape());
+        assert_eq!(map_result_1d.dtype(), par_map_result_1d.dtype());
+
+        let map_data_1d = map_result_1d.as_slice::<f32>().unwrap();
+        let par_map_data_1d = par_map_result_1d.as_slice::<f32>().unwrap();
+
+        for (i, (a, b)) in map_data_1d.iter().zip(par_map_data_1d.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "1D mismatch at index {}: {} vs {}",
+                i,
+                a,
+                b
+            );
+        }
+
+        // Test 2D tensor
+        let data_2d: Vec<f32> = (0..20).map(|i| (i as f32) * 0.1).collect();
+        let tensor_2d = Tensor::from_vec(data_2d, [5, 4]).unwrap();
+
+        let map_result_2d = tensor_2d.map::<f32>(|x| x * x).unwrap();
+        let par_map_result_2d = tensor_2d.par_map::<f32>(|x| x * x).unwrap();
+
+        assert_eq!(map_result_2d.shape(), par_map_result_2d.shape());
+        assert_eq!(map_result_2d.dtype(), par_map_result_2d.dtype());
+
+        let map_data_2d = map_result_2d.as_slice::<f32>().unwrap();
+        let par_map_data_2d = par_map_result_2d.as_slice::<f32>().unwrap();
+
+        for (i, (a, b)) in map_data_2d.iter().zip(par_map_data_2d.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "2D mismatch at index {}: {} vs {}",
+                i,
+                a,
+                b
+            );
+        }
+
+        // Test 3D tensor
+        let data_3d: Vec<f32> = (0..27).map(|i| (i as f32) * 0.1).collect();
+        let tensor_3d = Tensor::from_vec(data_3d, [3, 3, 3]).unwrap();
+
+        let map_result_3d = tensor_3d.map::<f32>(|x| x.sin()).unwrap();
+        let par_map_result_3d = tensor_3d.par_map::<f32>(|x| x.sin()).unwrap();
+
+        assert_eq!(map_result_3d.shape(), par_map_result_3d.shape());
+        assert_eq!(map_result_3d.dtype(), par_map_result_3d.dtype());
+
+        let map_data_3d = map_result_3d.as_slice::<f32>().unwrap();
+        let par_map_data_3d = par_map_result_3d.as_slice::<f32>().unwrap();
+
+        for (i, (a, b)) in map_data_3d.iter().zip(par_map_data_3d.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "3D mismatch at index {}: {} vs {}",
+                i,
+                a,
+                b
+            );
+        }
+
+        // Test non-contiguous tensor (2D transposed)
+        let data_2d_nc: Vec<f32> = (0..12).map(|i| (i as f32) * 0.1).collect();
+        let tensor_2d_nc = Tensor::from_vec(data_2d_nc, [3, 4]).unwrap();
+        let transposed = tensor_2d_nc.permute([1, 0]).unwrap();
+        assert!(!transposed.is_contiguous());
+
+        let map_result_nc = transposed.map::<f32>(|x| x.abs()).unwrap();
+        let par_map_result_nc = transposed.par_map::<f32>(|x| x.abs()).unwrap();
+
+        assert_eq!(map_result_nc.shape(), par_map_result_nc.shape());
+        assert_eq!(map_result_nc.dtype(), par_map_result_nc.dtype());
+
+        let map_data_nc = map_result_nc.as_slice::<f32>().unwrap();
+        let par_map_data_nc = par_map_result_nc.as_slice::<f32>().unwrap();
+
+        for (i, (a, b)) in map_data_nc.iter().zip(par_map_data_nc.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "Non-contiguous mismatch at index {}: {} vs {}",
+                i,
+                a,
+                b
+            );
+        }
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_map_different_data_types() {
+        // Test i32
+        let data_i32 = vec![1i32, -2, 3, -4, 5, -6];
+        let tensor_i32 = Tensor::from_vec(data_i32, [2, 3]).unwrap();
+        let result_i32 = tensor_i32.par_map::<i32>(|x| x.abs()).unwrap();
+        let expected_i32 = vec![1i32, 2, 3, 4, 5, 6];
+        assert_eq!(result_i32.as_slice::<i32>().unwrap(), &expected_i32);
+
+        // Test f64
+        let data_f64 = vec![1.0f64, 4.0, 9.0, 16.0];
+        let tensor_f64 = Tensor::from_vec(data_f64, [2, 2]).unwrap();
+        let result_f64 = tensor_f64.par_map::<f64>(|x| x.sqrt()).unwrap();
+        let expected_f64 = [1.0f64, 2.0, 3.0, 4.0];
+        let result_slice_f64 = result_f64.as_slice::<f64>().unwrap();
+        for (i, (actual, expected)) in result_slice_f64.iter().zip(expected_f64.iter()).enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "f64 mismatch at index {}: actual={}, expected={}",
+                i,
+                actual,
+                expected
+            );
+        }
+
+        // Test u8
+        let data_u8 = vec![1u8, 2, 3, 4, 5];
+        let tensor_u8 = Tensor::from_vec(data_u8, [5]).unwrap();
+        let result_u8 = tensor_u8.par_map::<u8>(|x| x * 2).unwrap();
+        let expected_u8 = vec![2u8, 4, 6, 8, 10];
+        assert_eq!(result_u8.as_slice::<u8>().unwrap(), &expected_u8);
+    }
+
+    #[test]
+    fn test_for_each_basic() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let tensor = Tensor::from_vec(data, [5]).unwrap();
+
+        // Test counting positive values
+        let mut count = 0;
+        tensor.for_each::<f32>(|x| {
+            if *x > 0.0 {
+                count += 1;
+            }
+        });
+        assert_eq!(count, 5);
+
+        // Test finding maximum value
+        let mut max_val = f32::NEG_INFINITY;
+        tensor.for_each::<f32>(|x| {
+            if *x > max_val {
+                max_val = *x;
+            }
+        });
+        assert_eq!(max_val, 5.0);
+    }
+
+    #[test]
+    fn test_for_each_contiguous() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+        assert!(tensor.is_contiguous());
+
+        let mut sum = 0.0f32;
+        tensor.for_each::<f32>(|x| {
+            sum += *x;
+        });
+        assert_eq!(sum, 21.0);
+    }
+
+    #[test]
+    fn test_for_each_non_contiguous() {
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+        let transposed = tensor.permute([1, 0]).unwrap();
+        assert!(!transposed.is_contiguous());
+
+        let mut sum = 0.0f32;
+        transposed.for_each::<f32>(|x| {
+            sum += *x;
+        });
+        assert_eq!(sum, 21.0); // Same sum as original
+    }
+
+    #[test]
+    fn test_for_each_different_types() {
+        // Test with i32
+        let data_i32 = vec![1i32, -2, 3, -4, 5];
+        let tensor_i32 = Tensor::from_vec(data_i32, [5]).unwrap();
+        let mut count_positive = 0;
+        tensor_i32.for_each::<i32>(|x| {
+            if *x > 0 {
+                count_positive += 1;
+            }
+        });
+        assert_eq!(count_positive, 3);
+
+        // Test with u8
+        let data_u8 = vec![1u8, 2, 3, 4, 5];
+        let tensor_u8 = Tensor::from_vec(data_u8, [5]).unwrap();
+        let mut sum_u8 = 0u8;
+        tensor_u8.for_each::<u8>(|x| {
+            sum_u8 += *x;
+        });
+        assert_eq!(sum_u8, 15);
+    }
+
+    #[test]
+    fn test_for_each_empty_tensor() {
+        let tensor = Tensor::from_vec(vec![0u8; 0], [0]).unwrap();
+        let mut count = 0;
+        tensor.for_each::<u8>(|_| {
+            count += 1;
+        });
+        assert_eq!(count, 0);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_basic() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let tensor = Tensor::from_vec(data, [5]).unwrap();
+
+        // Test counting values greater than 2.0
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        tensor.par_for_each::<f32>(move |x| {
+            if *x > 2.0 {
+                counter_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_contiguous() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+        assert!(tensor.is_contiguous());
+
+        // Test counting values greater than 3.0
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        tensor.par_for_each::<f32>(move |x| {
+            if *x > 3.0 {
+                counter_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(counter.load(Ordering::Relaxed), 3); // 4.0, 5.0, 6.0
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_non_contiguous() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, [2, 3]).unwrap();
+        let transposed = tensor.permute([1, 0]).unwrap();
+        assert!(!transposed.is_contiguous());
+
+        // Test counting even values
+        let counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        transposed.par_for_each::<f32>(move |x| {
+            if (*x as i32) % 2 == 0 {
+                counter_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(counter.load(Ordering::Relaxed), 3); // 2, 4, 6
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_vs_for_each_consistency() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let data: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, [1000]).unwrap();
+
+        // Sequential count
+        let mut seq_count = 0;
+        tensor.for_each::<f32>(|x| {
+            if *x > 500.0 {
+                seq_count += 1;
+            }
+        });
+
+        // Parallel count
+        let par_counter = std::sync::Arc::new(AtomicUsize::new(0));
+        let par_counter_clone = par_counter.clone();
+        tensor.par_for_each::<f32>(move |x| {
+            if *x > 500.0 {
+                par_counter_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let par_count = par_counter.load(Ordering::Relaxed);
+
+        assert_eq!(seq_count, par_count);
+        assert_eq!(seq_count, 499); // Values 501-999
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_different_types() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // Test with i32
+        let data_i32: Vec<i32> = (0..100).collect();
+        let tensor_i32 = Tensor::from_vec(data_i32, [100]).unwrap();
+        let counter_i32 = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter_i32_clone = counter_i32.clone();
+        tensor_i32.par_for_each::<i32>(move |x| {
+            if *x % 2 == 0 {
+                counter_i32_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(counter_i32.load(Ordering::Relaxed), 50);
+
+        // Test with u8
+        let data_u8: Vec<u8> = (0..50).map(|i| i as u8).collect();
+        let tensor_u8 = Tensor::from_vec(data_u8, [50]).unwrap();
+        let counter_u8 = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter_u8_clone = counter_u8.clone();
+        tensor_u8.par_for_each::<u8>(move |x| {
+            if *x < 25 {
+                counter_u8_clone.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(counter_u8.load(Ordering::Relaxed), 25);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn test_par_for_each_empty_tensor() {
+        let tensor = Tensor::from_vec(vec![0u8; 0], [0]).unwrap();
+        let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+        tensor.par_for_each::<u8>(move |_| {
+            counter_clone.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        });
+        assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 }
