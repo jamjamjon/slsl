@@ -5,7 +5,6 @@
 
 use crate::{DType, Shape, StorageTrait, TensorBase, TensorView};
 use std::marker::PhantomData;
-use std::ptr::NonNull;
 
 #[cfg(feature = "rayon")]
 use rayon::iter::plumbing::{bridge, Consumer, Producer, ProducerCallback};
@@ -213,10 +212,10 @@ impl<'a, S: StorageTrait> Iterator for DimIter<'a, S> {
         Some(unsafe {
             TensorView::from_raw_parts(
                 self.tensor.storage.as_storage(),
-                NonNull::new_unchecked(self.original_ptr),
+                self.tensor.storage.ptr(),
                 self.slice_shape,
                 self.slice_strides,
-                offset_bytes,
+                self.tensor.offset_bytes + offset_bytes,
                 self.dtype,
             )
         })
@@ -297,10 +296,10 @@ impl<'a, S: StorageTrait> Iterator for DimIter<'a, S> {
         Some(unsafe {
             TensorView::from_raw_parts(
                 self.tensor.storage.as_storage(),
-                NonNull::new_unchecked(self.original_ptr),
+                self.tensor.storage.ptr(),
                 self.slice_shape,
                 self.slice_strides,
-                offset_bytes,
+                self.tensor.offset_bytes + offset_bytes,
                 self.dtype,
             )
         })
@@ -330,10 +329,10 @@ impl<S: StorageTrait> DoubleEndedIterator for DimIter<'_, S> {
         Some(unsafe {
             TensorView::from_raw_parts(
                 self.tensor.storage.as_storage(),
-                NonNull::new_unchecked(self.original_ptr),
+                self.tensor.storage.ptr(),
                 self.slice_shape,
                 self.slice_strides,
-                offset_bytes,
+                self.tensor.offset_bytes + offset_bytes,
                 self.dtype,
             )
         })
@@ -758,5 +757,390 @@ mod tests {
         assert_eq!(tensor.dim_len(1), 3);
         assert_eq!(tensor.dim_len(2), 4);
         assert_eq!(tensor.dim_len(3), 5);
+    }
+
+    #[test]
+    fn test_iter_dim_data_correctness() {
+        // Test basic data correctness for 2D tensor
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, vec![2, 3]).unwrap();
+
+        let rows: Vec<_> = tensor.iter_dim(0).collect();
+        assert_eq!(rows.len(), 2);
+
+        // First row should be [1.0, 2.0, 3.0]
+        let row0_data = rows[0].as_slice::<f32>().unwrap();
+        assert_eq!(row0_data, &[1.0, 2.0, 3.0]);
+
+        // Second row should be [4.0, 5.0, 6.0]
+        let row1_data = rows[1].as_slice::<f32>().unwrap();
+        assert_eq!(row1_data, &[4.0, 5.0, 6.0]);
+
+        // Test iteration over dimension 1 - verify count and structure
+        let dim1_slices: Vec<_> = tensor.iter_dim(1).collect();
+        assert_eq!(dim1_slices.len(), 3);
+
+        // Each slice should have shape [2] (2 rows)
+        for slice in dim1_slices.iter() {
+            assert_eq!(slice.shape().as_slice(), &[2]);
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_3d_tensor() {
+        // Test with 3D tensor [2, 3, 4] = 24 elements
+        let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![2, 3, 4]).unwrap();
+
+        // Iterate over first dimension (2 slices of [3, 4])
+        let slices: Vec<_> = tensor.iter_dim(0).collect();
+        assert_eq!(slices.len(), 2);
+
+        // First slice should contain elements 0-11
+        let slice0 = slices[0].as_slice::<f32>().unwrap();
+        let expected0: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        assert_eq!(slice0, expected0.as_slice());
+
+        // Second slice should contain elements 12-23
+        let slice1 = slices[1].as_slice::<f32>().unwrap();
+        let expected1: Vec<f32> = (12..24).map(|i| i as f32).collect();
+        assert_eq!(slice1, expected1.as_slice());
+    }
+
+    #[test]
+    fn test_iter_dim_edge_cases() {
+        // Test empty dimension
+        let tensor_empty = Tensor::from_vec(Vec::<f32>::new(), vec![0, 5]).unwrap();
+        let empty_iter: Vec<_> = tensor_empty.iter_dim(0).collect();
+        assert_eq!(empty_iter.len(), 0);
+        assert!(tensor_empty.iter_dim(0).is_empty());
+
+        // Test single element dimension
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+        let tensor_single = Tensor::from_vec(data, vec![1, 5]).unwrap();
+        let single_iter: Vec<_> = tensor_single.iter_dim(0).collect();
+        assert_eq!(single_iter.len(), 1);
+
+        let slice_data = single_iter[0].as_slice::<f32>().unwrap();
+        assert_eq!(slice_data, &[1.0, 2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_iter_dim_iterator_methods() {
+        let data: Vec<f32> = (0..20).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![4, 5]).unwrap();
+
+        // Test take()
+        let taken: Vec<_> = tensor.iter_dim(0).take(2).collect();
+        assert_eq!(taken.len(), 2);
+
+        // Test skip()
+        let skipped: Vec<_> = tensor.iter_dim(0).skip(1).collect();
+        assert_eq!(skipped.len(), 3);
+
+        // Test enumerate
+        for (i, slice) in tensor.iter_dim(0).enumerate() {
+            let slice_data = slice.as_slice::<f32>().unwrap();
+            let expected_start = i * 5;
+            assert_eq!(slice_data[0], expected_start as f32);
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_split_at() {
+        let data: Vec<f32> = (0..20).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![4, 5]).unwrap();
+
+        let iter = tensor.iter_dim(0);
+        let (left, right) = iter.split_at(2);
+
+        let left_slices: Vec<_> = left.collect();
+        let right_slices: Vec<_> = right.collect();
+
+        assert_eq!(left_slices.len(), 2);
+        assert_eq!(right_slices.len(), 2);
+
+        // Verify data correctness
+        let left0_data = left_slices[0].as_slice::<f32>().unwrap();
+        assert_eq!(left0_data, &[0.0, 1.0, 2.0, 3.0, 4.0]);
+
+        let right0_data = right_slices[0].as_slice::<f32>().unwrap();
+        assert_eq!(right0_data, &[10.0, 11.0, 12.0, 13.0, 14.0]);
+    }
+
+    #[test]
+    fn test_iter_dim_nested_iteration() {
+        // Test nested iteration for 3D tensor
+        let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![2, 3, 4]).unwrap();
+
+        // Iterate over first dimension, then over nested dimension
+        for (i, outer_slice) in tensor.iter_dim(0).enumerate() {
+            assert_eq!(outer_slice.rank(), 2);
+            assert_eq!(outer_slice.shape().as_slice(), &[3, 4]);
+
+            // Nest iteration over the slice
+            let nested_slices: Vec<_> = outer_slice.iter_dim(0).collect();
+            assert_eq!(nested_slices.len(), 3);
+
+            for (j, inner_slice) in nested_slices.iter().enumerate() {
+                let slice_data = inner_slice.as_slice::<f32>().unwrap();
+                assert_eq!(slice_data.len(), 4);
+
+                // Verify first element matches expected pattern
+                let expected_first = (i * 12 + j * 4) as f32;
+                assert_eq!(slice_data[0], expected_first);
+            }
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_large_tensor_performance() {
+        // Test with moderately large tensor to ensure performance characteristics
+        let size = 1000;
+        let data: Vec<f32> = (0..size * 100).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![size, 100]).unwrap();
+
+        // Ultra-fast operations should complete instantly
+        assert_eq!(tensor.iter_dim(0).count(), size);
+        assert_eq!(tensor.iter_dim(0).len(), size);
+        assert!(!tensor.iter_dim(0).is_empty());
+
+        // Test first and last elements for correctness
+        let first = tensor.iter_dim(0).next().unwrap();
+        let first_data = first.as_slice::<f32>().unwrap();
+        assert_eq!(first_data[0], 0.0);
+
+        let last = tensor.iter_dim(0).last().unwrap();
+        let last_data = last.as_slice::<f32>().unwrap();
+        assert_eq!(last_data[0], (size - 1) as f32 * 100.0);
+    }
+
+    #[test]
+    fn test_iter_dim_double_ended() {
+        let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![3, 4]).unwrap();
+
+        let mut iter = tensor.iter_dim(0);
+
+        // Get first element
+        let first = iter.next().unwrap();
+        let first_data = first.as_slice::<f32>().unwrap();
+        assert_eq!(first_data, &[0.0, 1.0, 2.0, 3.0]);
+
+        // Get last element
+        let last = iter.next_back().unwrap();
+        let last_data = last.as_slice::<f32>().unwrap();
+        assert_eq!(last_data, &[8.0, 9.0, 10.0, 11.0]);
+
+        // Get middle element
+        let middle = iter.next().unwrap();
+        let middle_data = middle.as_slice::<f32>().unwrap();
+        assert_eq!(middle_data, &[4.0, 5.0, 6.0, 7.0]);
+
+        // Iterator should be exhausted
+        assert!(iter.next().is_none());
+        assert!(iter.next_back().is_none());
+    }
+
+    #[test]
+    fn test_iter_dim_various_shapes() {
+        let test_shapes = vec![
+            vec![2, 3],       // Small 2D
+            vec![3, 4, 5],    // 3D
+            vec![2, 3, 4, 5], // 4D
+            vec![1, 10],      // Single row
+            vec![10, 1],      // Single column
+        ];
+
+        for shape in test_shapes {
+            let total_elements: usize = shape.iter().product();
+            let data: Vec<f32> = (0..total_elements).map(|i| i as f32).collect();
+            let tensor = Tensor::from_vec(data, shape.clone()).unwrap();
+
+            // Test iteration over first dimension
+            let slices: Vec<_> = tensor.iter_dim(0).collect();
+            assert_eq!(slices.len(), shape[0]);
+
+            // Verify each slice has correct size
+            let expected_slice_size = if shape.len() > 1 {
+                shape[1..].iter().product()
+            } else {
+                1
+            };
+
+            for slice in slices {
+                let slice_data = slice.as_slice::<f32>().unwrap();
+                assert_eq!(slice_data.len(), expected_slice_size);
+            }
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_correctness_with_strides() {
+        // Test with non-contiguous tensor (different strides)
+        let data: Vec<f32> = (0..12).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![3, 4]).unwrap();
+
+        // Test basic iteration works with any stride configuration
+        let slices: Vec<_> = tensor.iter_dim(0).collect();
+        assert_eq!(slices.len(), 3);
+
+        // Verify all slices have correct shape
+        for slice in slices.iter() {
+            assert_eq!(slice.shape().as_slice(), &[4]);
+        }
+
+        // Test dimension 1 iteration
+        let dim1_slices: Vec<_> = tensor.iter_dim(1).collect();
+        assert_eq!(dim1_slices.len(), 4);
+
+        for slice in dim1_slices.iter() {
+            assert_eq!(slice.shape().as_slice(), &[3]);
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_boundary_conditions() {
+        // Test with very small tensors
+        let scalar_like = Tensor::from_vec(vec![42.0f32], vec![1]).unwrap();
+        let slices: Vec<_> = scalar_like.iter_dim(0).collect();
+        assert_eq!(slices.len(), 1);
+        let slice_data = slices[0].as_slice::<f32>().unwrap();
+        assert_eq!(slice_data, &[42.0]);
+
+        // Test split_at edge cases
+        let data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let tensor = Tensor::from_vec(data, vec![3, 2]).unwrap();
+
+        // Split at beginning
+        let (left, right) = tensor.iter_dim(0).split_at(0);
+        assert_eq!(left.len(), 0);
+        assert_eq!(right.len(), 3);
+
+        // Split at end
+        let (left, right) = tensor.iter_dim(0).split_at(3);
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 0);
+    }
+
+    #[test]
+    fn test_iter_dim_memory_safety() {
+        // Test that iterators maintain correct memory references
+        let data: Vec<f32> = (0..100).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![10, 10]).unwrap();
+
+        // Create multiple iterators and verify they don't interfere
+        let mut iter1 = tensor.iter_dim(0);
+        let mut iter2 = tensor.iter_dim(0);
+
+        let slice1 = iter1.nth(5).unwrap();
+        let slice2 = iter2.nth(5).unwrap();
+
+        let data1 = slice1.as_slice::<f32>().unwrap();
+        let data2 = slice2.as_slice::<f32>().unwrap();
+
+        // Both should point to the same data
+        assert_eq!(data1, data2);
+        assert_eq!(data1[0], 50.0);
+    }
+
+    #[test]
+    fn test_iter_dim_consistency_across_dimensions() {
+        // Test that iteration is consistent across different dimensions
+        let data: Vec<f32> = (0..60).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![3, 4, 5]).unwrap();
+
+        // Iterate over each dimension and verify counts
+        assert_eq!(tensor.iter_dim(0).count(), 3);
+        assert_eq!(tensor.iter_dim(1).count(), 4);
+        assert_eq!(tensor.iter_dim(2).count(), 5);
+
+        // Verify slice shapes are correct
+        let dim0_slice = tensor.iter_dim(0).next().unwrap();
+        assert_eq!(dim0_slice.shape().as_slice(), &[4, 5]);
+
+        let dim1_slice = tensor.iter_dim(1).next().unwrap();
+        assert_eq!(dim1_slice.shape().as_slice(), &[3, 5]);
+
+        let dim2_slice = tensor.iter_dim(2).next().unwrap();
+        assert_eq!(dim2_slice.shape().as_slice(), &[3, 4]);
+    }
+
+    #[test]
+    fn test_iter_dim_offset_correctness() {
+        // Create a slice of a tensor and verify iteration works correctly
+        let data: Vec<f32> = (0..24).map(|i| i as f32).collect();
+        let tensor = Tensor::from_vec(data, vec![4, 6]).unwrap();
+
+        // Test with a simple subview to verify offset handling
+        // Get a view of the tensor starting from row 1
+        let slices: Vec<_> = tensor.iter_dim(0).collect();
+        let view = &slices[1]; // This creates an offset view
+        assert_eq!(view.shape().as_slice(), &[6]);
+
+        // The view should contain elements [6, 7, 8, 9, 10, 11]
+        let view_data = view.as_slice::<f32>().unwrap();
+        assert_eq!(view_data, &[6.0, 7.0, 8.0, 9.0, 10.0, 11.0]);
+
+        // Test nested iteration with proper offset handling
+        let nested_slices: Vec<_> = tensor.iter_dim(0).skip(1).take(2).collect();
+        assert_eq!(nested_slices.len(), 2);
+
+        // First nested slice (row 1)
+        let slice0_data = nested_slices[0].as_slice::<f32>().unwrap();
+        assert_eq!(slice0_data, &[6.0, 7.0, 8.0, 9.0, 10.0, 11.0]);
+
+        // Second nested slice (row 2)
+        let slice1_data = nested_slices[1].as_slice::<f32>().unwrap();
+        assert_eq!(slice1_data, &[12.0, 13.0, 14.0, 15.0, 16.0, 17.0]);
+    }
+
+    #[test]
+    fn test_iter_dim_extreme_shapes() {
+        // Test with very wide tensor
+        let data: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let wide_tensor = Tensor::from_vec(data, vec![1, 1000]).unwrap();
+
+        let slices: Vec<_> = wide_tensor.iter_dim(0).collect();
+        assert_eq!(slices.len(), 1);
+
+        let slice_data = slices[0].as_slice::<f32>().unwrap();
+        assert_eq!(slice_data.len(), 1000);
+        assert_eq!(slice_data[0], 0.0);
+        assert_eq!(slice_data[999], 999.0);
+
+        // Test with very tall tensor
+        let data: Vec<f32> = (0..1000).map(|i| i as f32).collect();
+        let tall_tensor = Tensor::from_vec(data, vec![1000, 1]).unwrap();
+
+        let slices: Vec<_> = tall_tensor.iter_dim(0).collect();
+        assert_eq!(slices.len(), 1000);
+
+        for (i, slice) in slices.iter().enumerate() {
+            let slice_data = slice.as_slice::<f32>().unwrap();
+            assert_eq!(slice_data.len(), 1);
+            assert_eq!(slice_data[0], i as f32);
+        }
+    }
+
+    #[test]
+    fn test_iter_dim_zero_stride_edge_case() {
+        // Test behavior with dimension size 1 (which could have zero stride optimization)
+        let data = vec![42.0f32];
+        let tensor = Tensor::from_vec(data, vec![1, 1, 1, 1]).unwrap();
+
+        for dim in 0..4 {
+            let slices: Vec<_> = tensor.iter_dim(dim).collect();
+            assert_eq!(slices.len(), 1);
+
+            // The remaining tensor should have one less dimension
+            let remaining_dims: Vec<usize> = (0..4).filter(|&d| d != dim).map(|_| 1).collect();
+            if remaining_dims.is_empty() {
+                // If we're left with a scalar, as_slice should return array with one element
+                let slice_data = slices[0].as_slice::<f32>().unwrap();
+                assert_eq!(slice_data, &[42.0]);
+            }
+        }
     }
 }
