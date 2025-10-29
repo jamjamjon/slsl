@@ -3,11 +3,10 @@
 //! This module provides traits and structures for managing tensor data storage,
 //! including both custom allocated memory and Vec-based memory.
 
-use crate::TensorElement;
+use crate::{Shared, TensorElement};
 use anyhow::Result;
 use std::alloc::{alloc, Layout};
 use std::ptr::NonNull;
-use std::sync::Arc;
 
 /// Trait for types that can provide storage functionality.
 ///
@@ -39,7 +38,17 @@ pub(crate) struct StorageInner {
     vec_element_size: usize,
 }
 
+// StorageInner Send/Sync implementations
+//
+// Send + Sync are needed when threaded OR rayon feature is enabled
+// - All fields are either immutable or raw pointers to immutable data
+// - Safe for concurrent access from multiple threads
+// - See Shared<T> for detailed safety analysis of Rayon + Rc
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl Send for StorageInner {}
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl Sync for StorageInner {}
 
 impl Drop for StorageInner {
@@ -63,19 +72,33 @@ impl Drop for StorageInner {
     }
 }
 
-/// Thread-safe reference-counted storage for tensor data.
+/// Reference-counted storage for tensor data.
 ///
 /// This structure provides a safe wrapper around memory storage with
 /// automatic cleanup and reference counting capabilities.
+///
+/// By default, uses `Rc` for single-threaded scenarios (lower overhead).
+/// With the `threaded` feature enabled, uses `Arc` for thread-safe sharing.
 #[derive(Debug, Clone)]
 pub struct Storage {
     /// Reference-counted inner storage
-    _inner: Arc<StorageInner>,
+    _inner: Shared<StorageInner>,
     /// Cached pointer for fast access
     cached_ptr: NonNull<u8>,
 }
 
+// Storage Send/Sync implementations
+//
+// Send + Sync are needed when threaded OR rayon feature is enabled
+// - Depends on Shared<StorageInner>: Send + Sync
+// - See Shared<T> for detailed safety analysis of Rayon + Rc
+// - Note: Even though Storage: Send with rayon, TensorBase<Storage> is NOT Send
+//   (only Sync), which prevents moving Tensor across threads when using Rc
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl Send for Storage {}
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl Sync for Storage {}
 
 impl Storage {
@@ -97,7 +120,7 @@ impl Storage {
             anyhow::bail!("Failed to allocate memory");
         }
         let ptr = NonNull::new(ptr).unwrap();
-        let _inner = Arc::new(StorageInner {
+        let _inner = Shared::new(StorageInner {
             ptr,
             layout,
             is_vec_memory: false,
@@ -114,7 +137,7 @@ impl Storage {
     ///
     /// This shows how many Storage instances are sharing the same underlying memory.
     pub fn strong_count(&self) -> usize {
-        std::sync::Arc::strong_count(&self._inner)
+        Shared::strong_count(&self._inner)
     }
 
     /// Creates a new storage from an existing Vec.
@@ -141,7 +164,7 @@ impl Storage {
         let mut data = std::mem::ManuallyDrop::new(data);
         let ptr = data.as_mut_ptr() as *mut u8;
         let ptr = NonNull::new(ptr).ok_or_else(|| anyhow::anyhow!("Vec pointer is null"))?;
-        let _inner = Arc::new(StorageInner {
+        let _inner = Shared::new(StorageInner {
             ptr,
             layout,
             is_vec_memory: true,

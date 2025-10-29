@@ -55,8 +55,40 @@ pub type Tensor = TensorBase<Storage>;
 /// and views without copying data, using borrowed storage.
 pub type TensorView<'a> = TensorBase<&'a Storage>;
 
-unsafe impl<S: StorageTrait + Send> Send for TensorBase<S> {}
-unsafe impl<S: StorageTrait + Sync> Sync for TensorBase<S> {}
+// TensorBase Send/Sync implementations
+//
+// IMPORTANT DISTINCTION:
+// - TensorBase<Storage>: Owned tensor
+// - TensorBase<&Storage>: Borrowed view (TensorView)
+//
+// For TensorBase<Storage> (owned):
+// - Send: Only with threaded feature (Arc), prevents moving Rc across threads
+// - Sync: With threaded or rayon, allows &Tensor to be shared
+//
+// For TensorBase<&Storage> (view):
+// - Send: With threaded or rayon, allows TensorView to be sent to worker threads
+// - Sync: With threaded or rayon, allows &TensorView to be shared
+//
+// The key safety invariant:
+// - With rayon only: Tensor (owned) is NOT Send, but TensorView is Send
+// - This prevents moving the Rc, while allowing views to be sent to workers
+// - Views only contain borrows, so sending them doesn't touch Rc's ref count
+
+// Owned Tensor: Send only with threaded (Arc)
+#[cfg(feature = "threaded")]
+unsafe impl Send for TensorBase<Storage> {}
+
+// Owned Tensor: Sync with threaded or rayon
+#[cfg(any(feature = "threaded", feature = "rayon"))]
+unsafe impl Sync for TensorBase<Storage> {}
+
+// TensorView: Send with threaded or rayon (safe because it's just a borrow)
+#[cfg(any(feature = "threaded", feature = "rayon"))]
+unsafe impl Send for TensorBase<&Storage> {}
+
+// TensorView: Sync with threaded or rayon
+#[cfg(any(feature = "threaded", feature = "rayon"))]
+unsafe impl Sync for TensorBase<&Storage> {}
 
 impl Tensor {
     /// Creates a view of this tensor without copying data.

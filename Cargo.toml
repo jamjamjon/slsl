@@ -1,7 +1,7 @@
 [package]
 name = "slsl"
-version = "0.0.7"
-rust-version = "1.82"
+version = "0.0.8"
+rust-version = "1.83"
 edition = "2021"
 readme = "README.md"
 license = "MIT"
@@ -12,6 +12,7 @@ exclude = ["examples/*", "benches/*", "tests/*"]
 
 [features]
 default = []
+threaded = []
 rayon = ["dep:rayon"]
 accelerate = ["dep:accelerate-src"]
 mkl = ["dep:intel-mkl-src"]

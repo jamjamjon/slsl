@@ -450,7 +450,7 @@ impl<'a, S: StorageTrait + Send + Sync> ParallelIterator for ParDimIter<'a, S> {
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync> IndexedParallelIterator for ParDimIter<'a, S> {
+impl<S: StorageTrait + Send + Sync> IndexedParallelIterator for ParDimIter<'_, S> {
     fn drive<C>(self, consumer: C) -> C::Result
     where
         C: Consumer<Self::Item>,

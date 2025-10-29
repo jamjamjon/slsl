@@ -22,7 +22,17 @@ pub struct TensorTypeIter<'a, S: StorageTrait, T> {
     _phantom: PhantomData<T>,
 }
 
+// TensorTypeIter Send/Sync implementations
+//
+// Send + Sync are needed when threaded OR rayon feature is enabled
+// - Iterator contains references to tensor data
+// - Safe when Storage is thread-safe
+// - See Shared<T> for detailed safety analysis of Rayon + Rc
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl<S: StorageTrait, T: Send> Send for TensorTypeIter<'_, S, T> {}
+
+#[cfg(any(feature = "threaded", feature = "rayon"))]
 unsafe impl<S: StorageTrait, T: Sync> Sync for TensorTypeIter<'_, S, T> {}
 
 impl<'a, S: StorageTrait, T: TensorElement> TensorTypeIter<'a, S, T> {
@@ -232,8 +242,8 @@ impl<'a, S: StorageTrait + Send + Sync, T: TensorElement + Send + Sync>
 }
 
 #[cfg(feature = "rayon")]
-impl<'a, S: StorageTrait + Send + Sync, T: TensorElement + Send + Sync>
-    rayon::iter::IndexedParallelIterator for ParTensorTypeIter<'a, S, T>
+impl<S: StorageTrait + Send + Sync, T: TensorElement + Send + Sync>
+    rayon::iter::IndexedParallelIterator for ParTensorTypeIter<'_, S, T>
 {
     fn len(&self) -> usize {
         self.inner.len()
