@@ -1520,11 +1520,25 @@ macro_rules! impl_sum_int {
                     if x.is_empty() {
                         return 0.0;
                     }
-                    let mut sum: $acc = 0;
-                    for &val in x {
-                        sum += val as $acc;
+                    #[cfg(feature = "rayon")]
+                    {
+                        use rayon::prelude::*;
+                        if x.len() >= 65_536 {
+                            let s: $acc = x.par_chunks(64 * 1024)
+                                .map(|chunk| {
+                                    let mut s: $acc = 0;
+                                    for &v in chunk { s += v as $acc; }
+                                    s
+                                })
+                                .sum();
+                            return s as f64;
+                        }
                     }
-                    sum as f64
+
+                    // single-thread path (plain loop to enable autovectorization)
+                    let mut s: $acc = 0;
+                    for &v in x { s += v as $acc; }
+                    s as f64
                 }
             }
         )+

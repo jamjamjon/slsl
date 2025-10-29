@@ -85,34 +85,59 @@ pub trait OpsTrait: Send + Sync {
         if x.is_empty() {
             return 0.0;
         }
-
-        // Use SIMD optimization for larger arrays
-        if x.len() >= 32 {
-            use wide::f32x8;
-
-            let chunks = x.chunks_exact(8);
-            let remainder = chunks.remainder();
-
-            // Process chunks of 8 elements using SIMD
-            let mut sum_vec = f32x8::splat(0.0);
-            for chunk in chunks {
-                let vec = f32x8::from_slice(chunk);
-                sum_vec += vec;
+        // Use SIMD + (optional) rayon reduction; avoid dot(ones) to prevent extra allocation/copy overhead
+        #[inline(always)]
+        fn sum_f32_chunk(chunk: &[f32]) -> f32 {
+            if chunk.len() >= 32 {
+                use wide::f32x8;
+                let chunks = chunk.chunks_exact(8);
+                let remainder = chunks.remainder();
+                let mut sum_vec = f32x8::splat(0.0);
+                for c in chunks {
+                    let vec = f32x8::from_slice(c);
+                    sum_vec += vec;
+                }
+                let mut result = sum_vec.reduce_add();
+                for &val in remainder {
+                    result += val;
+                }
+                result
+            } else {
+                // small chunk fallback: unrolled accumulate
+                let n = chunk.len();
+                let mut a0 = 0.0f32;
+                let mut a1 = 0.0f32;
+                let mut a2 = 0.0f32;
+                let mut a3 = 0.0f32;
+                let mut i = 0;
+                let len4 = n & !3;
+                while i < len4 {
+                    a0 += chunk[i];
+                    a1 += chunk[i + 1];
+                    a2 += chunk[i + 2];
+                    a3 += chunk[i + 3];
+                    i += 4;
+                }
+                while i < n {
+                    a0 += chunk[i];
+                    i += 1;
+                }
+                a0 + a1 + a2 + a3
             }
-
-            // Use reduce_add to sum all elements in the vector
-            let mut result = sum_vec.reduce_add();
-
-            // Process remaining elements
-            for &val in remainder {
-                result += val;
-            }
-
-            return result;
         }
 
-        // Fallback to standard sum for small arrays
-        x.iter().sum()
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            if x.len() >= 524_288 {
+                return x
+                    .par_chunks(128 * 1024)
+                    .map(|c| sum_f32_chunk(c) as f64)
+                    .sum::<f64>() as f32;
+            }
+        }
+
+        sum_f32_chunk(x)
     }
 
     /// SIMD-optimized sum function for f64 arrays
@@ -122,34 +147,55 @@ pub trait OpsTrait: Send + Sync {
         if x.is_empty() {
             return 0.0;
         }
-
-        // Use SIMD optimization for larger arrays
-        if x.len() >= 16 {
-            use wide::f64x4;
-
-            let chunks = x.chunks_exact(4);
-            let remainder = chunks.remainder();
-
-            // Process chunks of 4 elements using SIMD
-            let mut sum_vec = f64x4::splat(0.0);
-            for chunk in chunks {
-                let vec = f64x4::from_slice(chunk);
-                sum_vec += vec;
+        // Use SIMD + (optional) rayon reduction; avoid dot(ones) to prevent extra allocation/copy overhead
+        #[inline(always)]
+        fn sum_f64_chunk(chunk: &[f64]) -> f64 {
+            if chunk.len() >= 16 {
+                use wide::f64x4;
+                let chunks = chunk.chunks_exact(4);
+                let remainder = chunks.remainder();
+                let mut sum_vec = f64x4::splat(0.0);
+                for c in chunks {
+                    let vec = f64x4::from_slice(c);
+                    sum_vec += vec;
+                }
+                let mut result = sum_vec.reduce_add();
+                for &val in remainder {
+                    result += val;
+                }
+                result
+            } else {
+                let n = chunk.len();
+                let mut a0 = 0.0f64;
+                let mut a1 = 0.0f64;
+                let mut a2 = 0.0f64;
+                let mut a3 = 0.0f64;
+                let mut i = 0;
+                let len4 = n & !3;
+                while i < len4 {
+                    a0 += chunk[i];
+                    a1 += chunk[i + 1];
+                    a2 += chunk[i + 2];
+                    a3 += chunk[i + 3];
+                    i += 4;
+                }
+                while i < n {
+                    a0 += chunk[i];
+                    i += 1;
+                }
+                a0 + a1 + a2 + a3
             }
-
-            // Use reduce_add to sum all elements in the vector
-            let mut result = sum_vec.reduce_add();
-
-            // Process remaining elements
-            for &val in remainder {
-                result += val;
-            }
-
-            return result;
         }
 
-        // Fallback to standard sum for small arrays
-        x.iter().sum()
+        #[cfg(feature = "rayon")]
+        {
+            use rayon::prelude::*;
+            if x.len() >= 524_288 {
+                return x.par_chunks(128 * 1024).map(sum_f64_chunk).sum::<f64>();
+            }
+        }
+
+        sum_f64_chunk(x)
     }
 
     #[inline(always)]

@@ -1,11 +1,12 @@
 #![allow(unused)]
 use candle_core::{Device, Tensor as CandleTensor};
 use criterion::{criterion_group, criterion_main, Criterion};
+use ndarray::{Array, IxDyn};
 use slsl::*;
 use std::hint::black_box;
 
 // 1D
-const SIZES_1D: &[usize] = &[10, 32, 64, 128, 256, 376, 512, 768, 1024, 1344, 2048, 4096];
+const SIZES_1D: &[usize] = &[10, 64, 128, 256, 512, 1024, 2048, 4096];
 
 // 2D
 const SIZES_2D: &[(usize, usize)] = &[
@@ -44,31 +45,69 @@ fn benchmark_1d_sum_all(c: &mut Criterion) {
         let slsl_tensor_u8 = Tensor::from_vec(data_u8.clone(), [size]).unwrap();
         let candle_tensor_u8 = CandleTensor::from_vec(data_u8.clone(), size, &device).unwrap();
 
-        // f32 sum_all
+        // f32 sum_all - slsl
         group.bench_function(format!("slsl/f32/{size}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - candle
         group.bench_function(format!("candle/f32/{size}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - ndarray
+        group.bench_function(format!("ndarray/f32/{size}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[size]), data_f32.clone()).unwrap();
+                let s: f32 = arr.sum();
+                black_box(s as f64);
+            })
+        });
+        // f32 sum_all - vec
+        group.bench_function(format!("vec/f32/{size}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: f64 = 0.0;
+                for &v in data_f32.iter() {
+                    acc += v as f64;
+                }
+                black_box(acc);
+            })
+        });
 
-        // u8 sum_all
+        // u8 sum_all - slsl
         group.bench_function(format!("slsl/u8/{size}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_u8.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // u8 sum_all - candle
         group.bench_function(format!("candle/u8/{size}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_u8.sum_all().unwrap();
                 black_box(result);
+            })
+        });
+        // u8 sum_all - ndarray
+        group.bench_function(format!("ndarray/u8/{size}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[size]), data_u8.clone()).unwrap();
+                let s: u32 = arr.mapv(|x| x as u32).sum();
+                black_box(s as f64);
+            })
+        });
+        // u8 sum_all - vec
+        group.bench_function(format!("vec/u8/{size}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: u64 = 0;
+                for &v in data_u8.iter() {
+                    acc += v as u64;
+                }
+                black_box(acc as f64);
             })
         });
     }
@@ -151,31 +190,69 @@ fn benchmark_2d_sum_all(c: &mut Criterion) {
         let candle_tensor_u8 =
             CandleTensor::from_vec(data_u8.clone(), (rows, cols), &device).unwrap();
 
-        // f32 sum_all
+        // f32 sum_all - slsl
         group.bench_function(format!("slsl/f32/{rows}x{cols}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - candle
         group.bench_function(format!("candle/f32/{rows}x{cols}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - ndarray
+        group.bench_function(format!("ndarray/f32/{rows}x{cols}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[rows, cols]), data_f32.clone()).unwrap();
+                let s: f32 = arr.sum();
+                black_box(s as f64);
+            })
+        });
+        // f32 sum_all - vec
+        group.bench_function(format!("vec/f32/{rows}x{cols}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: f64 = 0.0;
+                for &v in data_f32.iter() {
+                    acc += v as f64;
+                }
+                black_box(acc);
+            })
+        });
 
-        // u8 sum_all
+        // u8 sum_all - slsl
         group.bench_function(format!("slsl/u8/{rows}x{cols}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_u8.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // u8 sum_all - candle
         group.bench_function(format!("candle/u8/{rows}x{cols}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_u8.sum_all().unwrap();
                 black_box(result);
+            })
+        });
+        // u8 sum_all - ndarray
+        group.bench_function(format!("ndarray/u8/{rows}x{cols}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[rows, cols]), data_u8.clone()).unwrap();
+                let s: u32 = arr.mapv(|x| x as u32).sum();
+                black_box(s as f64);
+            })
+        });
+        // u8 sum_all - vec
+        group.bench_function(format!("vec/u8/{rows}x{cols}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: u64 = 0;
+                for &v in data_u8.iter() {
+                    acc += v as u64;
+                }
+                black_box(acc as f64);
             })
         });
     }
@@ -290,31 +367,69 @@ fn benchmark_3d_sum_all(c: &mut Criterion) {
         let candle_tensor_u8 =
             CandleTensor::from_vec(data_u8.clone(), (d1, d2, d3), &device).unwrap();
 
-        // f32 sum_all
+        // f32 sum_all - slsl
         group.bench_function(format!("slsl/f32/{d1}x{d2}x{d3}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - candle
         group.bench_function(format!("candle/f32/{d1}x{d2}x{d3}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_f32.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // f32 sum_all - ndarray
+        group.bench_function(format!("ndarray/f32/{d1}x{d2}x{d3}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[d1, d2, d3]), data_f32.clone()).unwrap();
+                let s: f32 = arr.sum();
+                black_box(s as f64);
+            })
+        });
+        // f32 sum_all - vec
+        group.bench_function(format!("vec/f32/{d1}x{d2}x{d3}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: f64 = 0.0;
+                for &v in data_f32.iter() {
+                    acc += v as f64;
+                }
+                black_box(acc);
+            })
+        });
 
-        // u8 sum_all
+        // u8 sum_all - slsl
         group.bench_function(format!("slsl/u8/{d1}x{d2}x{d3}"), |bencher| {
             bencher.iter(|| {
                 let result = slsl_tensor_u8.sum_all().unwrap();
                 black_box(result);
             })
         });
+        // u8 sum_all - candle
         group.bench_function(format!("candle/u8/{d1}x{d2}x{d3}"), |bencher| {
             bencher.iter(|| {
                 let result = candle_tensor_u8.sum_all().unwrap();
                 black_box(result);
+            })
+        });
+        // u8 sum_all - ndarray
+        group.bench_function(format!("ndarray/u8/{d1}x{d2}x{d3}"), |bencher| {
+            bencher.iter(|| {
+                let arr = Array::from_shape_vec(IxDyn(&[d1, d2, d3]), data_u8.clone()).unwrap();
+                let s: u32 = arr.mapv(|x| x as u32).sum();
+                black_box(s as f64);
+            })
+        });
+        // u8 sum_all - vec
+        group.bench_function(format!("vec/u8/{d1}x{d2}x{d3}"), |bencher| {
+            bencher.iter(|| {
+                let mut acc: u64 = 0;
+                for &v in data_u8.iter() {
+                    acc += v as u64;
+                }
+                black_box(acc as f64);
             })
         });
     }

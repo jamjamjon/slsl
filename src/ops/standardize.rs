@@ -119,24 +119,25 @@ impl<S: StorageTrait> TensorBase<S> {
         let numel = self.numel();
         let shape = *self.shape();
 
-        // Pre-compute reciprocals to avoid division in the hot loop
+        // Pre-compute reciprocals and fused (a, b): y = x * a + b, where a = 1/std, b = -mean/std
         let inv_std: Vec<T> = std.iter().map(|&s| T::ONE / s).collect();
 
         match T::DTYPE {
             crate::DType::Fp32 => {
                 let mean_f32 = unsafe { std::mem::transmute::<&[T], &[f32]>(mean) };
                 let inv_std_f32 = unsafe { std::mem::transmute::<&[T], &[f32]>(&inv_std) };
+                // Precompute affine params
+                let a: Vec<f32> = inv_std_f32.to_vec();
+                let b: Vec<f32> = mean_f32
+                    .iter()
+                    .zip(inv_std_f32.iter())
+                    .map(|(&m, &is)| -m * is)
+                    .collect();
 
                 let out = UninitVec::<f32>::new(numel).init_with(|dst| {
                     if self.is_contiguous() {
                         let input_slice = self.as_slice::<f32>().unwrap();
-                        self.standardize_contiguous_f32(
-                            input_slice,
-                            mean_f32,
-                            inv_std_f32,
-                            dim,
-                            dst,
-                        );
+                        self.standardize_contiguous_f32(input_slice, &a, &b, dim, dst);
                     } else {
                         self.standardize_non_contiguous_f32(mean_f32, inv_std_f32, dim, dst);
                     }
@@ -146,17 +147,17 @@ impl<S: StorageTrait> TensorBase<S> {
             crate::DType::Fp64 => {
                 let mean_f64 = unsafe { std::mem::transmute::<&[T], &[f64]>(mean) };
                 let inv_std_f64 = unsafe { std::mem::transmute::<&[T], &[f64]>(&inv_std) };
+                let a: Vec<f64> = inv_std_f64.to_vec();
+                let b: Vec<f64> = mean_f64
+                    .iter()
+                    .zip(inv_std_f64.iter())
+                    .map(|(&m, &is)| -m * is)
+                    .collect();
 
                 let out = UninitVec::<f64>::new(numel).init_with(|dst| {
                     if self.is_contiguous() {
                         let input_slice = self.as_slice::<f64>().unwrap();
-                        self.standardize_contiguous_f64(
-                            input_slice,
-                            mean_f64,
-                            inv_std_f64,
-                            dim,
-                            dst,
-                        );
+                        self.standardize_contiguous_f64(input_slice, &a, &b, dim, dst);
                     } else {
                         self.standardize_non_contiguous_f64(mean_f64, inv_std_f64, dim, dst);
                     }
@@ -179,8 +180,8 @@ impl<S: StorageTrait> TensorBase<S> {
     fn standardize_contiguous_f32(
         &self,
         input: &[f32],
-        mean: &[f32],
-        inv_std: &[f32],
+        a: &[f32],
+        b: &[f32],
         dim: usize,
         output: &mut [f32],
     ) {
@@ -196,13 +197,13 @@ impl<S: StorageTrait> TensorBase<S> {
             let channel_size = elements_per_channel;
 
             for ch in 0..dim_size {
-                let m = mean[ch];
-                let s = inv_std[ch];
+                let aa = a[ch];
+                let bb = b[ch];
                 let start = ch * channel_size;
                 let end = start + channel_size;
 
                 for i in start..end {
-                    output[i] = (input[i] - m) * s;
+                    output[i] = input[i] * aa + bb;
                 }
             }
         } else if dim == shape.len() - 1 {
@@ -211,12 +212,104 @@ impl<S: StorageTrait> TensorBase<S> {
                 let start = chunk_idx * dim_size;
                 for ch in 0..dim_size {
                     let idx = start + ch;
-                    output[idx] = (input[idx] - mean[ch]) * inv_std[ch];
+                    output[idx] = input[idx] * a[ch] + b[ch];
                 }
             }
         } else {
-            // General case: use stride-based indexing
-            self.standardize_general_f32(input, mean, inv_std, dim, output);
+            // Generic fast path for any contiguous tensor and arbitrary dim
+            // Treat data as [outer, dim, inner] where inner is contiguous
+            let mut outer: usize = 1;
+            for i in 0..dim {
+                outer *= shape[i];
+            }
+            let mut inner: usize = 1;
+            for i in (dim + 1)..shape.len() {
+                inner *= shape[i];
+            }
+
+            // Process block-wise to maximize cache locality
+            // Layout is contiguous, so slices of length `inner` are contiguous
+            let block = dim_size * inner;
+            // Parallelize over outer if large enough
+            #[cfg(feature = "rayon")]
+            {
+                if outer * dim_size * inner >= 1_000_000 {
+                    use rayon::prelude::*;
+                    output
+                        .par_chunks_mut(block)
+                        .enumerate()
+                        .for_each(|(o, out_block)| {
+                            let base = o * block;
+                            let in_block = &input[base..base + block];
+                            let mut ch_base = 0;
+                            for ch in 0..dim_size {
+                                let aa = a[ch];
+                                let bb = b[ch];
+                                let offset = ch_base;
+                                if inner == 10 {
+                                    out_block[offset] = in_block[offset] * aa + bb;
+                                    out_block[offset + 1] = in_block[offset + 1] * aa + bb;
+                                    out_block[offset + 2] = in_block[offset + 2] * aa + bb;
+                                    out_block[offset + 3] = in_block[offset + 3] * aa + bb;
+                                    out_block[offset + 4] = in_block[offset + 4] * aa + bb;
+                                    out_block[offset + 5] = in_block[offset + 5] * aa + bb;
+                                    out_block[offset + 6] = in_block[offset + 6] * aa + bb;
+                                    out_block[offset + 7] = in_block[offset + 7] * aa + bb;
+                                    out_block[offset + 8] = in_block[offset + 8] * aa + bb;
+                                    out_block[offset + 9] = in_block[offset + 9] * aa + bb;
+                                } else {
+                                    for k in 0..inner {
+                                        let idx = offset + k;
+                                        out_block[idx] = in_block[idx] * aa + bb;
+                                    }
+                                }
+                                ch_base += inner;
+                            }
+                        });
+                    return;
+                }
+            }
+
+            let mut base = 0;
+            for _ in 0..outer {
+                let mut ch_base = 0;
+                for ch in 0..dim_size {
+                    let aa = a[ch];
+                    let bb = b[ch];
+                    let in_ptr = base + ch_base;
+                    if inner == 10 {
+                        let idx0 = in_ptr;
+                        unsafe {
+                            *output.get_unchecked_mut(idx0) = *input.get_unchecked(idx0) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 1) =
+                                *input.get_unchecked(idx0 + 1) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 2) =
+                                *input.get_unchecked(idx0 + 2) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 3) =
+                                *input.get_unchecked(idx0 + 3) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 4) =
+                                *input.get_unchecked(idx0 + 4) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 5) =
+                                *input.get_unchecked(idx0 + 5) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 6) =
+                                *input.get_unchecked(idx0 + 6) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 7) =
+                                *input.get_unchecked(idx0 + 7) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 8) =
+                                *input.get_unchecked(idx0 + 8) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 9) =
+                                *input.get_unchecked(idx0 + 9) * aa + bb;
+                        }
+                    } else {
+                        for k in 0..inner {
+                            let idx = in_ptr + k;
+                            output[idx] = input[idx] * aa + bb;
+                        }
+                    }
+                    ch_base += inner;
+                }
+                base += block;
+            }
         }
     }
 
@@ -224,8 +317,8 @@ impl<S: StorageTrait> TensorBase<S> {
     fn standardize_contiguous_f64(
         &self,
         input: &[f64],
-        mean: &[f64],
-        inv_std: &[f64],
+        a: &[f64],
+        b: &[f64],
         dim: usize,
         output: &mut [f64],
     ) {
@@ -238,13 +331,13 @@ impl<S: StorageTrait> TensorBase<S> {
             let channel_size = elements_per_channel;
 
             for ch in 0..dim_size {
-                let m = mean[ch];
-                let s = inv_std[ch];
+                let aa = a[ch];
+                let bb = b[ch];
                 let start = ch * channel_size;
                 let end = start + channel_size;
 
                 for i in start..end {
-                    output[i] = (input[i] - m) * s;
+                    output[i] = input[i] * aa + bb;
                 }
             }
         } else if dim == shape.len() - 1 {
@@ -253,17 +346,106 @@ impl<S: StorageTrait> TensorBase<S> {
                 let start = chunk_idx * dim_size;
                 for ch in 0..dim_size {
                     let idx = start + ch;
-                    output[idx] = (input[idx] - mean[ch]) * inv_std[ch];
+                    output[idx] = input[idx] * a[ch] + b[ch];
                 }
             }
         } else {
-            // General case: use stride-based indexing
-            self.standardize_general_f64(input, mean, inv_std, dim, output);
+            // Generic fast path for any contiguous tensor and arbitrary dim
+            let mut outer: usize = 1;
+            for i in 0..dim {
+                outer *= shape[i];
+            }
+            let mut inner: usize = 1;
+            for i in (dim + 1)..shape.len() {
+                inner *= shape[i];
+            }
+
+            let block = dim_size * inner;
+            #[cfg(feature = "rayon")]
+            {
+                if outer * dim_size * inner >= 1_000_000 {
+                    use rayon::prelude::*;
+                    output
+                        .par_chunks_mut(block)
+                        .enumerate()
+                        .for_each(|(o, out_block)| {
+                            let base = o * block;
+                            let in_block = &input[base..base + block];
+                            let mut ch_base = 0;
+                            for ch in 0..dim_size {
+                                let aa = a[ch];
+                                let bb = b[ch];
+                                let offset = ch_base;
+                                if inner == 10 {
+                                    out_block[offset] = in_block[offset] * aa + bb;
+                                    out_block[offset + 1] = in_block[offset + 1] * aa + bb;
+                                    out_block[offset + 2] = in_block[offset + 2] * aa + bb;
+                                    out_block[offset + 3] = in_block[offset + 3] * aa + bb;
+                                    out_block[offset + 4] = in_block[offset + 4] * aa + bb;
+                                    out_block[offset + 5] = in_block[offset + 5] * aa + bb;
+                                    out_block[offset + 6] = in_block[offset + 6] * aa + bb;
+                                    out_block[offset + 7] = in_block[offset + 7] * aa + bb;
+                                    out_block[offset + 8] = in_block[offset + 8] * aa + bb;
+                                    out_block[offset + 9] = in_block[offset + 9] * aa + bb;
+                                } else {
+                                    for k in 0..inner {
+                                        let idx = offset + k;
+                                        out_block[idx] = in_block[idx] * aa + bb;
+                                    }
+                                }
+                                ch_base += inner;
+                            }
+                        });
+                    return;
+                }
+            }
+
+            let mut base = 0;
+            for _ in 0..outer {
+                let mut ch_base = 0;
+                for ch in 0..dim_size {
+                    let aa = a[ch];
+                    let bb = b[ch];
+                    let in_ptr = base + ch_base;
+                    if inner == 10 {
+                        let idx0 = in_ptr;
+                        unsafe {
+                            *output.get_unchecked_mut(idx0) = *input.get_unchecked(idx0) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 1) =
+                                *input.get_unchecked(idx0 + 1) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 2) =
+                                *input.get_unchecked(idx0 + 2) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 3) =
+                                *input.get_unchecked(idx0 + 3) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 4) =
+                                *input.get_unchecked(idx0 + 4) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 5) =
+                                *input.get_unchecked(idx0 + 5) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 6) =
+                                *input.get_unchecked(idx0 + 6) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 7) =
+                                *input.get_unchecked(idx0 + 7) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 8) =
+                                *input.get_unchecked(idx0 + 8) * aa + bb;
+                            *output.get_unchecked_mut(idx0 + 9) =
+                                *input.get_unchecked(idx0 + 9) * aa + bb;
+                        }
+                    } else {
+                        for k in 0..inner {
+                            let idx = in_ptr + k;
+                            output[idx] = input[idx] * aa + bb;
+                        }
+                    }
+                    ch_base += inner;
+                }
+                base += block;
+            }
         }
     }
 
     /// General standardize implementation for f32 with arbitrary dimension
     #[inline]
+    #[allow(dead_code)]
     fn standardize_general_f32(
         &self,
         input: &[f32],
@@ -295,6 +477,7 @@ impl<S: StorageTrait> TensorBase<S> {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn standardize_general_f64(
         &self,
         input: &[f64],
