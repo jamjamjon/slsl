@@ -36,7 +36,7 @@ openblas-src = { version = "0.10.12", optional = true, features = ["system"] }
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["html_reports"] }
-ndarray = { version = "0.16", features = ["rayon"] }
+ndarray = { version = "0.17", features = ["rayon"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
 base64ct = "=1.7.3"
