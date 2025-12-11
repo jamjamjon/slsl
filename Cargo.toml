@@ -35,7 +35,7 @@ intel-mkl-src = { version = "0.8", optional = true, features = ["mkl-dynamic-lp6
 openblas-src = { version = "0.10.12", optional = true, features = ["system"] }
 
 [dev-dependencies]
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 ndarray = { version = "0.16", features = ["rayon"] }
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
